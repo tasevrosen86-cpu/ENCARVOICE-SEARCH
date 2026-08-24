@@ -15,6 +15,9 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
 
+    private static final String ENCAR_PACKAGE =
+            "com.encar.encarMobileApp";
+
     private TextView statusText;
 
     @Override
@@ -28,7 +31,7 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.WHITE);
 
         TextView title = new TextView(this);
-        title.setText("ENCAR LINK DIAGNOSTICS");
+        title.setText("ENCAR DEEP LINK TEST");
         title.setTextSize(22);
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
@@ -43,60 +46,60 @@ public class MainActivity extends Activity {
 
         statusText = new TextView(this);
         statusText.setText(
-                "Тестваме кой линк отваря директно Search / Filter в Encar."
+                "Принудително подаваме Search линка директно към Encar."
         );
         statusText.setTextSize(15);
         statusText.setTextColor(Color.DKGRAY);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 35, 0, 25);
+        statusText.setPadding(0, 35, 0, 30);
 
         root.addView(statusText);
 
-        // 1
+        Button searchButton = new Button(this);
+        searchButton.setText("1. FORCE ENCAR SEARCH");
+
+        root.addView(
+                searchButton,
+                buttonParams()
+        );
+
+        Button filterButton = new Button(this);
+        filterButton.setText("2. FORCE FILTER PAGE");
+
+        root.addView(
+                filterButton,
+                buttonParams()
+        );
+
         Button homeButton = new Button(this);
-        homeButton.setText("1. ENCAR HOME");
+        homeButton.setText("3. ENCAR HOME");
 
         root.addView(
                 homeButton,
                 buttonParams()
         );
 
-        // 2
-        Button mobileSearchButton = new Button(this);
-        mobileSearchButton.setText("2. MOBILE SEARCH");
-
-        root.addView(
-                mobileSearchButton,
-                buttonParams()
+        // Простият мобилен Search адрес
+        searchButton.setOnClickListener(v ->
+                openInsideEncar(
+                        "https://m.encar.com/ca/search.do",
+                        "FORCE SEARCH"
+                )
         );
 
-        // 3
-        Button carSearchButton = new Button(this);
-        carSearchButton.setText("3. CAR SEARCH");
-
-        root.addView(
-                carSearchButton,
-                buttonParams()
+        // Същата Search страница с начално състояние
+        filterButton.setOnClickListener(v ->
+                openInsideEncar(
+                        "https://m.encar.com/ca/search.do#!%7B%22type%22%3A%22car%22%2C%22action%22%3A%22%22%2C%22toggle%22%3A%7B%7D%2C%22layer%22%3A%22%22%7D",
+                        "FORCE FILTER"
+                )
         );
 
+        // Контролен тест
         homeButton.setOnClickListener(v ->
-                openLink(
+                openNormal(
                         "https://car.encar.com/",
                         "HOME"
-                )
-        );
-
-        mobileSearchButton.setOnClickListener(v ->
-                openLink(
-                        "https://m.encar.com/ca/search.do",
-                        "MOBILE SEARCH"
-                )
-        );
-
-        carSearchButton.setOnClickListener(v ->
-                openLink(
-                        "https://car.encar.com/ca/search.do",
-                        "CAR SEARCH"
                 )
         );
 
@@ -111,17 +114,12 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT
                 );
 
-        params.setMargins(
-                0,
-                10,
-                0,
-                10
-        );
+        params.setMargins(0, 10, 0, 10);
 
         return params;
     }
 
-    private void openLink(
+    private void openInsideEncar(
             String url,
             String name
     ) {
@@ -134,6 +132,10 @@ public class MainActivity extends Activity {
                             Uri.parse(url)
                     );
 
+            // КЛЮЧОВАТА РАЗЛИКА:
+            // не позволяваме на Chrome да поеме линка
+            intent.setPackage(ENCAR_PACKAGE);
+
             intent.addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK
             );
@@ -141,18 +143,47 @@ public class MainActivity extends Activity {
             startActivity(intent);
 
             statusText.setText(
-                    name + " → " + url
+                    name + " → подаден директно към Encar"
             );
 
         } catch (ActivityNotFoundException e) {
 
             statusText.setText(
-                    name + " не можа да бъде отворен."
+                    name + " → Encar не прие този адрес"
             );
 
             Toast.makeText(
                     this,
-                    "Неуспешно отваряне: " + url,
+                    "Encar не прие този deep link.",
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
+    private void openNormal(
+            String url,
+            String name
+    ) {
+
+        try {
+
+            Intent intent =
+                    new Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse(url)
+                    );
+
+            startActivity(intent);
+
+            statusText.setText(
+                    name + " → отворен"
+            );
+
+        } catch (ActivityNotFoundException e) {
+
+            Toast.makeText(
+                    this,
+                    "Неуспешно отваряне.",
                     Toast.LENGTH_LONG
             ).show();
         }
