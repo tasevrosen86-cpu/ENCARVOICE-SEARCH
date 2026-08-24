@@ -1,6 +1,7 @@
 package com.encarvoicesearch;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -12,9 +13,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
-
-    private static final String ENCAR_PACKAGE =
-            "com.encar.encarMobileApp";
 
     private TextView statusText;
 
@@ -34,78 +32,59 @@ public class MainActivity extends Activity {
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
 
-        LinearLayout.LayoutParams titleParams =
+        root.addView(
+                title,
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-
-        titleParams.setMargins(0, 0, 0, 40);
-
-        root.addView(title, titleParams);
+                )
+        );
 
         statusText = new TextView(this);
-        statusText.setText(
-                "Тест: нашето приложение → официалното Encar приложение"
-        );
+        statusText.setText("Тест за директно отваряне на Encar");
         statusText.setTextSize(16);
-        statusText.setTextColor(Color.DKGRAY);
         statusText.setGravity(Gravity.CENTER);
+        statusText.setPadding(0, 40, 0, 30);
 
-        LinearLayout.LayoutParams statusParams =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-
-        statusParams.setMargins(0, 0, 0, 30);
-
-        root.addView(statusText, statusParams);
+        root.addView(statusText);
 
         Button openButton = new Button(this);
         openButton.setText("ОТВОРИ ENCAR");
         openButton.setTextSize(18);
 
-        LinearLayout.LayoutParams buttonParams =
+        root.addView(
+                openButton,
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-
-        root.addView(openButton, buttonParams);
-
-        openButton.setOnClickListener(v ->
-                openEncarApp()
+                )
         );
+
+        openButton.setOnClickListener(v -> openEncar());
 
         setContentView(root);
     }
 
-    private void openEncarApp() {
+    private void openEncar() {
 
-        Intent launchIntent =
-                getPackageManager()
-                        .getLaunchIntentForPackage(
-                                ENCAR_PACKAGE
-                        );
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        intent.setPackage("com.encar.encarMobileApp");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
-        if (launchIntent != null) {
+        try {
 
-            statusText.setText(
-                    "Отварям Encar..."
-            );
+            startActivity(intent);
 
-            startActivity(launchIntent);
+            statusText.setText("Отварям Encar...");
 
-        } else {
+        } catch (ActivityNotFoundException e) {
 
-            statusText.setText(
-                    "Encar не беше намерено."
-            );
+            statusText.setText("Не успях да стартирам Encar.");
 
             Toast.makeText(
                     this,
-                    "Официалното Encar приложение не беше намерено.",
+                    "Encar не можа да бъде стартирано.",
                     Toast.LENGTH_LONG
             ).show();
         }
