@@ -22,121 +22,137 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         LinearLayout root = new LinearLayout(this);
-
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
-        root.setPadding(40, 40, 40, 40);
+        root.setPadding(35, 35, 35, 35);
         root.setBackgroundColor(Color.WHITE);
 
-        // Заглавие
         TextView title = new TextView(this);
-
-        title.setText("ENCAR VOICE SEARCH");
+        title.setText("ENCAR LINK DIAGNOSTICS");
         title.setTextSize(22);
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
 
-        LinearLayout.LayoutParams titleParams =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-
-        titleParams.setMargins(
-                0,
-                0,
-                0,
-                40
-        );
-
         root.addView(
                 title,
-                titleParams
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
         );
 
-        // Статус
         statusText = new TextView(this);
-
         statusText.setText(
-                "Тест: отваряне на официалното Encar приложение чрез линк"
+                "Тестваме кой линк отваря директно Search / Filter в Encar."
         );
-
-        statusText.setTextSize(16);
+        statusText.setTextSize(15);
         statusText.setTextColor(Color.DKGRAY);
         statusText.setGravity(Gravity.CENTER);
+        statusText.setPadding(0, 35, 0, 25);
 
-        LinearLayout.LayoutParams statusParams =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
+        root.addView(statusText);
 
-        statusParams.setMargins(
-                0,
-                0,
-                0,
-                30
-        );
+        // 1
+        Button homeButton = new Button(this);
+        homeButton.setText("1. ENCAR HOME");
 
         root.addView(
-                statusText,
-                statusParams
+                homeButton,
+                buttonParams()
         );
 
-        // Бутон
-        Button openButton = new Button(this);
-
-        openButton.setText("ОТВОРИ ENCAR");
-        openButton.setTextSize(18);
-
-        LinearLayout.LayoutParams buttonParams =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                );
+        // 2
+        Button mobileSearchButton = new Button(this);
+        mobileSearchButton.setText("2. MOBILE SEARCH");
 
         root.addView(
-                openButton,
-                buttonParams
+                mobileSearchButton,
+                buttonParams()
         );
 
-        openButton.setOnClickListener(
-                v -> openEncar()
+        // 3
+        Button carSearchButton = new Button(this);
+        carSearchButton.setText("3. CAR SEARCH");
+
+        root.addView(
+                carSearchButton,
+                buttonParams()
+        );
+
+        homeButton.setOnClickListener(v ->
+                openLink(
+                        "https://car.encar.com/",
+                        "HOME"
+                )
+        );
+
+        mobileSearchButton.setOnClickListener(v ->
+                openLink(
+                        "https://m.encar.com/ca/search.do",
+                        "MOBILE SEARCH"
+                )
+        );
+
+        carSearchButton.setOnClickListener(v ->
+                openLink(
+                        "https://car.encar.com/ca/search.do",
+                        "CAR SEARCH"
+                )
         );
 
         setContentView(root);
     }
 
-    private void openEncar() {
+    private LinearLayout.LayoutParams buttonParams() {
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+        params.setMargins(
+                0,
+                10,
+                0,
+                10
+        );
+
+        return params;
+    }
+
+    private void openLink(
+            String url,
+            String name
+    ) {
 
         try {
-
-            Uri encarUri =
-                    Uri.parse(
-                            "https://car.encar.com/"
-                    );
 
             Intent intent =
                     new Intent(
                             Intent.ACTION_VIEW,
-                            encarUri
+                            Uri.parse(url)
                     );
+
+            intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+            );
 
             startActivity(intent);
 
             statusText.setText(
-                    "Подавам линка към Encar..."
+                    name + " → " + url
             );
 
         } catch (ActivityNotFoundException e) {
 
             statusText.setText(
-                    "Не успях да отворя Encar."
+                    name + " не можа да бъде отворен."
             );
 
             Toast.makeText(
                     this,
-                    "Няма приложение, което може да отвори Encar.",
+                    "Неуспешно отваряне: " + url,
                     Toast.LENGTH_LONG
             ).show();
         }
