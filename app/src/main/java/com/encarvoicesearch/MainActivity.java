@@ -1,11 +1,16 @@
 package com.encarvoicesearch;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
+import android.text.method.ScrollingMovementMethod;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
@@ -14,6 +19,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -36,6 +42,8 @@ public class MainActivity extends Activity {
     private String selectedModel = "";
     private String selectedYear = "";
 
+    private final StringBuilder diagnosticText = new StringBuilder();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -44,9 +52,9 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
 
-        // ==============================
+        // =========================
         // ГОРЕН ПАНЕЛ
-        // ==============================
+        // =========================
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -58,13 +66,12 @@ public class MainActivity extends Activity {
         title.setTextSize(18);
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 0, 0, 8);
 
         panel.addView(title);
 
-        brandValue = createText("Марка: -");
-        modelValue = createText("Модел: -");
-        yearValue = createText("Година: -");
+        brandValue = makeText("Марка: -");
+        modelValue = makeText("Модел: -");
+        yearValue = makeText("Година: -");
 
         panel.addView(brandValue);
         panel.addView(modelValue);
@@ -78,19 +85,18 @@ public class MainActivity extends Activity {
 
         panel.addView(statusValue);
 
-        // ==============================
+        // =========================
         // БУТОНИ
-        // ==============================
+        // =========================
 
-        LinearLayout buttonRow = new LinearLayout(this);
-        buttonRow.setOrientation(LinearLayout.HORIZONTAL);
-        buttonRow.setGravity(Gravity.CENTER);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
 
         Button voiceButton = new Button(this);
         voiceButton.setText("ГЛАС");
 
-        Button searchButton = new Button(this);
-        searchButton.setText("ТЪРСИ");
+        Button diagnosticButton = new Button(this);
+        diagnosticButton.setText("ДИАГНОСТИКА");
 
         LinearLayout.LayoutParams buttonParams =
                 new LinearLayout.LayoutParams(
@@ -101,10 +107,10 @@ public class MainActivity extends Activity {
 
         buttonParams.setMargins(5, 0, 5, 0);
 
-        buttonRow.addView(voiceButton, buttonParams);
-        buttonRow.addView(searchButton, buttonParams);
+        buttons.addView(voiceButton, buttonParams);
+        buttons.addView(diagnosticButton, buttonParams);
 
-        panel.addView(buttonRow);
+        panel.addView(buttons);
 
         root.addView(
                 panel,
@@ -114,9 +120,9 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // ==============================
+        // =========================
         // WEBVIEW
-        // ==============================
+        // =========================
 
         webView = new WebView(this);
 
@@ -131,64 +137,49 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        WebSettings webSettings = webView.getSettings();
+        WebSettings settings = webView.getSettings();
 
-        webSettings.setJavaScriptEnabled(true);
-        webSettings.setDomStorageEnabled(true);
-        webSettings.setDatabaseEnabled(true);
-        webSettings.setLoadWithOverviewMode(true);
-        webSettings.setUseWideViewPort(true);
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setUseWideViewPort(true);
 
-        webView.setWebViewClient(new WebViewClient());
-
-        // Позволява JavaScript да показва статус в нашия панел
         webView.addJavascriptInterface(
                 new EncarBridge(),
                 "AndroidBridge"
         );
 
-        // Директно ENCAR - никакъв Google
+        webView.setWebViewClient(new WebViewClient());
+
         String encarUrl =
                 "https://m.encar.com/ca/search.do#!%7B%22type%22%3A%22car%22%2C%22action%22%3A%22(And.Hidden.N._.MultiViewHidden.N._.(Or.Separation.F._.Separation.B.)_.SellType.%EC%9D%BC%EB%B0%98._.CarType.A._.Mileage.range(..400000)._.Price.range(100..10000).)%22%2C%22toggle%22%3A%7B%7D%2C%22layer%22%3A%22%22%2C%22title%22%3A%22Mercedes-Benz%20GLE-Class%20W167(19%EB%85%84~%ED%98%84%EC%9E%AC)%22%2C%22sort%22%3A%22MobilePriceAsc%22%2C%22cursor%22%3A%22%22%7D";
 
         webView.loadUrl(encarUrl);
 
-        // ==============================
+        // =========================
         // ГЛАС
-        // ==============================
+        // =========================
 
         voiceButton.setOnClickListener(v ->
                 startVoiceRecognition()
         );
 
-        // ==============================
-        // ТЪРСЕНЕ
-        // ==============================
+        // =========================
+        // ДИАГНОСТИКА
+        // =========================
 
-        searchButton.setOnClickListener(v -> {
-
-            if (selectedBrand.isEmpty()
-                    || selectedModel.isEmpty()
-                    || selectedYear.isEmpty()) {
-
-                Toast.makeText(
-                        this,
-                        "Първо кажи марка, модел и година.",
-                        Toast.LENGTH_LONG
-                ).show();
-
-                return;
-            }
+        diagnosticButton.setOnClickListener(v -> {
 
             statusValue.setText(
-                    "Стартирам търсене..."
+                    "Чета структурата на Encar..."
             );
 
-            automateEncarSearch();
+            runDiagnostics();
         });
     }
 
-    private TextView createText(String text) {
+    private TextView makeText(String text) {
 
         TextView view = new TextView(this);
 
@@ -200,9 +191,9 @@ public class MainActivity extends Activity {
         return view;
     }
 
-    // =========================================================
-    // ГЛАСОВО РАЗПОЗНАВАНЕ
-    // =========================================================
+    // =====================================================
+    // ГЛАС
+    // =====================================================
 
     private void startVoiceRecognition() {
 
@@ -268,48 +259,39 @@ public class MainActivity extends Activity {
             if (results != null
                     && !results.isEmpty()) {
 
-                String spokenText =
-                        results.get(0);
+                String spokenText = results.get(0);
 
                 statusValue.setText(
                         "Разпознато: " + spokenText
                 );
 
-                parseVoiceCommand(
-                        spokenText
-                );
+                parseVoiceCommand(spokenText);
             }
         }
     }
 
-    // =========================================================
-    // РАЗДЕЛЯНЕ НА МАРКА / МОДЕЛ / ГОДИНА
-    // =========================================================
-
     private void parseVoiceCommand(String spokenText) {
 
-        String text =
-                spokenText.trim();
+        selectedBrand = "";
+        selectedModel = "";
+        selectedYear = "";
 
-        String yearToken = "";
+        String text = spokenText.trim();
 
-        // 2025
-        Matcher fullYear =
+        Matcher matcher =
                 Pattern.compile(
                         "\\b(19\\d{2}|20\\d{2})\\b"
                 ).matcher(text);
 
-        if (fullYear.find()) {
+        String yearToken = "";
 
-            selectedYear =
-                    fullYear.group(1);
+        if (matcher.find()) {
 
-            yearToken =
-                    fullYear.group();
+            selectedYear = matcher.group(1);
+            yearToken = matcher.group();
 
         } else {
 
-            // Поддържаме и "25" или "25-та"
             Matcher shortYear =
                     Pattern.compile(
                             "\\b(\\d{2})(?:-?та)?\\b"
@@ -322,8 +304,7 @@ public class MainActivity extends Activity {
                                 shortYear.group(1)
                         );
 
-                if (value >= 15
-                        && value <= 40) {
+                if (value >= 15 && value <= 40) {
 
                     selectedYear =
                             String.valueOf(
@@ -355,90 +336,73 @@ public class MainActivity extends Activity {
                         .replace("Година", "")
                         .trim();
 
-        String[] words =
-                carPart.split("\\s+");
-
-        if (words.length < 2) {
-
-            Toast.makeText(
-                    this,
-                    "Кажи марка, модел и година.",
-                    Toast.LENGTH_LONG
-            ).show();
-
-            return;
-        }
-
-        selectedBrand =
-                words[0];
-
-        StringBuilder model =
-                new StringBuilder();
-
-        for (int i = 1;
-             i < words.length;
-             i++) {
-
-            if (i > 1) {
-                model.append(" ");
-            }
-
-            model.append(
-                    words[i]
-            );
-        }
-
-        selectedModel =
-                model.toString()
-                        .trim();
-
-        /*
-         * Ако гласът каже:
-         * Mercedes Benz GLE 2025
-         */
         String lower =
                 carPart.toLowerCase();
 
-        if (lower.startsWith(
-                "mercedes benz "
-        )) {
+        if (lower.startsWith("mercedes benz ")) {
 
-            selectedBrand =
-                    "Mercedes-Benz";
+            selectedBrand = "Mercedes-Benz";
 
             selectedModel =
                     carPart.substring(
                             "mercedes benz".length()
                     ).trim();
-        }
 
-        if (lower.startsWith(
-                "land rover "
-        )) {
+        } else if (lower.startsWith("land rover ")) {
 
-            selectedBrand =
-                    "Land Rover";
+            selectedBrand = "Land Rover";
 
             selectedModel =
                     carPart.substring(
                             "land rover".length()
                     ).trim();
+
+        } else {
+
+            String[] words =
+                    carPart.split("\\s+");
+
+            if (words.length < 2) {
+
+                Toast.makeText(
+                        this,
+                        "Кажи марка, модел и година.",
+                        Toast.LENGTH_LONG
+                ).show();
+
+                return;
+            }
+
+            selectedBrand = words[0];
+
+            StringBuilder model =
+                    new StringBuilder();
+
+            for (int i = 1; i < words.length; i++) {
+
+                if (i > 1) {
+                    model.append(" ");
+                }
+
+                model.append(words[i]);
+            }
+
+            selectedModel =
+                    model.toString().trim();
         }
 
         brandValue.setText(
-                "Марка: "
-                        + selectedBrand
+                "Марка: " + selectedBrand
         );
 
         modelValue.setText(
-                "Модел: "
-                        + selectedModel
+                "Модел: " + selectedModel
         );
 
         yearValue.setText(
                 "Година: "
                         + selectedYear
-                        + "  (01/"
+                        + " (01/"
                         + selectedYear
                         + " - 12/"
                         + selectedYear
@@ -446,49 +410,20 @@ public class MainActivity extends Activity {
         );
     }
 
-    // =========================================================
-    // ENCAR АВТОМАТИЗАЦИЯ
-    // =========================================================
+    // =====================================================
+    // DOM ДИАГНОСТИКА
+    // =====================================================
 
-    private void automateEncarSearch() {
-
-        String brand =
-                escapeJs(
-                        selectedBrand
-                );
-
-        String model =
-                escapeJs(
-                        selectedModel
-                );
-
-        String year =
-                escapeJs(
-                        selectedYear
-                );
+    private void runDiagnostics() {
 
         String script =
 
-                "(async function() {" +
+                "(function() {" +
 
-                "const BRAND='" + brand + "';" +
-                "const MODEL='" + model + "';" +
-                "const YEAR='" + year + "';" +
-
-                "function report(msg) {" +
+                "function send(s) {" +
                 " try {" +
-                "  AndroidBridge.report(msg);" +
+                "  AndroidBridge.report(String(s));" +
                 " } catch(e) {}" +
-                "}" +
-
-                "function sleep(ms) {" +
-                " return new Promise(r => setTimeout(r, ms));" +
-                "}" +
-
-                "function norm(s) {" +
-                " return (s || '')" +
-                "  .toLowerCase()" +
-                "  .replace(/[^a-z0-9가-힣]/g,'');" +
                 "}" +
 
                 "function visible(el) {" +
@@ -496,310 +431,171 @@ public class MainActivity extends Activity {
                 " const r=el.getBoundingClientRect();" +
                 " const s=getComputedStyle(el);" +
                 " return r.width>0 && r.height>0" +
-                "  && s.display!=='none'" +
-                "  && s.visibility!=='hidden';" +
+                " && s.display!=='none'" +
+                " && s.visibility!=='hidden';" +
                 "}" +
 
-                /*
-                 * Намира видим текст на страницата
-                 * и натиска най-малкия подходящ елемент.
-                 */
-                "function clickText(values) {" +
+                "function describe(el) {" +
 
-                " const wanted=values.map(norm);" +
+                " if (!el) return 'NULL';" +
 
-                " let nodes=[...document.querySelectorAll(" +
-                " 'button,a,[role=\"button\"],li,label,div,span,p'" +
-                " )].filter(visible);" +
+                " const r=el.getBoundingClientRect();" +
 
-                " nodes=nodes.filter(el => {" +
-                "  const t=norm(el.innerText || el.textContent);" +
+                " const text=" +
+                "  (el.innerText || el.textContent || '')" +
+                "  .trim()" +
+                "  .replace(/\\s+/g,' ')" +
+                "  .slice(0,140);" +
 
-                "  if (!t) return false;" +
+                " const cls=" +
+                "  (typeof el.className==='string'" +
+                "   ? el.className : '')" +
+                "  .slice(0,180);" +
 
-                "  return wanted.some(w =>" +
-                "   t===w || t.includes(w)" +
-                "  );" +
-                " });" +
-
-                " nodes.sort((a,b) =>" +
-                "  (a.innerText || '').length -" +
-                "  (b.innerText || '').length" +
-                " );" +
-
-                " if (!nodes.length)" +
-                "  return false;" +
-
-                " let target=nodes[0];" +
-
-                " let clickable=target.closest(" +
-                " 'button,a,[role=\"button\"],li,label'" +
-                " );" +
-
-                " if (clickable)" +
-                "  target=clickable;" +
-
-                " target.scrollIntoView({" +
-                "  block:'center'" +
-                " });" +
-
-                " target.click();" +
-
-                " return true;" +
+                " return '<'+el.tagName.toLowerCase()" +
+                "  +' id=\"'+(el.id||'')+'\"'" +
+                "  +' class=\"'+cls+'\"'" +
+                "  +' role=\"'+(el.getAttribute('role')||'')+'\"'" +
+                "  +' text=\"'+text+'\"'" +
+                "  +' rect='" +
+                "  +Math.round(r.left)+','" +
+                "  +Math.round(r.top)+','" +
+                "  +Math.round(r.width)+','" +
+                "  +Math.round(r.height)+'>';" +
                 "}" +
 
-                /*
-                 * Настройване на истински HTML SELECT,
-                 * ако Encar използва такъв.
-                 */
-                "function setSelectValue(select, wanted) {" +
+                "AndroidBridge.clear();" +
 
-                " const options=[...select.options];" +
+                "send('ENCAR DOM DIAGNOSTICS');" +
+                "send('URL: '+location.href);" +
+                "send('TITLE: '+document.title);" +
+                "send('READY: '+document.readyState);" +
 
-                " let option=options.find(o =>" +
-                "  norm(o.textContent)===norm(wanted)" +
-                " );" +
+                // IFRAМЕ проверка
+                "const frames=[...document.querySelectorAll('iframe')];" +
+                "send('IFRAMES: '+frames.length);" +
 
-                " if (!option) {" +
-                "  option=options.find(o =>" +
-                "   norm(o.textContent).includes(norm(wanted))" +
-                "  );" +
-                " }" +
-
-                " if (!option)" +
-                "  return false;" +
-
-                " select.value=option.value;" +
-
-                " select.dispatchEvent(" +
-                "  new Event('input',{bubbles:true})" +
-                " );" +
-
-                " select.dispatchEvent(" +
-                "  new Event('change',{bubbles:true})" +
-                " );" +
-
-                " return true;" +
-                "}" +
-
-                // =========================================
-                // 1. MANUFACTURER
-                // =========================================
-
-                "report('Отварям Manufacturer...');" +
-
-                "if (!clickText([" +
-                " 'Manufacturer'," +
-                " 'Maker'," +
-                " '제조사'" +
-                " ])) {" +
-
-                " report('Не намерих Manufacturer');" +
-                " return;" +
-                "}" +
-
-                "await sleep(900);" +
-
-                "report('Избирам марка: '+BRAND);" +
-
-                "if (!clickText([" +
-                " BRAND," +
-                " BRAND.replace('-', ' ')" +
-                " ])) {" +
-
-                " report('Не намерих марката: '+BRAND);" +
-                " return;" +
-                "}" +
-
-                "await sleep(900);" +
-
-                // =========================================
-                // 2. MODEL
-                // =========================================
-
-                "report('Отварям Model...');" +
-
-                "if (!clickText([" +
-                " 'Model'," +
-                " '모델'" +
-                " ])) {" +
-
-                " report('Не намерих Model');" +
-                " return;" +
-                "}" +
-
-                "await sleep(900);" +
-
-                "report('Избирам модел: '+MODEL);" +
-
-                "if (!clickText([MODEL])) {" +
-
-                " report('Не намерих модела: '+MODEL);" +
-                " return;" +
-                "}" +
-
-                "await sleep(900);" +
-
-                // =========================================
-                // 3. YEAR
-                // =========================================
-
-                "report('Отварям Year...');" +
-
-                "if (!clickText([" +
-                " 'Year'," +
-                " '연식'" +
-                " ])) {" +
-
-                " report('Не намерих Year');" +
-                " return;" +
-                "}" +
-
-                "await sleep(900);" +
-
-                /*
-                 * Първо опитваме директно със SELECT полета.
-                 */
-                "let selects=[...document.querySelectorAll('select')]" +
-                " .filter(visible);" +
-
-                "let yearSelects=selects.filter(s =>" +
-                " [...s.options].some(o =>" +
-                "  norm(o.textContent).includes(norm(YEAR))" +
-                " )" +
-                ");" +
-
-                "if (yearSelects.length >= 2) {" +
-
-                " setSelectValue(yearSelects[0], YEAR);" +
-                " setSelectValue(yearSelects[1], YEAR);" +
-
-                " report('Годината е зададена: '+YEAR);" +
-
-                "} else {" +
-
-                /*
-                 * Ако са custom менюта:
-                 * Minimum year -> YEAR
-                 */
-                " report('Задавам начална година...');" +
-
-                " clickText([" +
-                "  'Minimum model year'," +
-                "  'Minimum year'," +
-                "  'Min year'," +
-                "  'From'" +
-                " ]);" +
-
-                " await sleep(500);" +
-
-                " clickText([YEAR]);" +
-
-                " await sleep(500);" +
-
-                /*
-                 * Maximum year -> YEAR
-                 */
-                " report('Задавам крайна година...');" +
-
-                " clickText([" +
-                "  'Maximum model year'," +
-                "  'Maximum year'," +
-                "  'Max year'," +
-                "  'To'" +
-                " ]);" +
-
-                " await sleep(500);" +
-
-                " clickText([YEAR]);" +
-
-                " await sleep(500);" +
-
-                "}" +
-
-                // =========================================
-                // 4. MONTHS
-                // =========================================
-
-                "selects=[...document.querySelectorAll('select')]" +
-                " .filter(visible);" +
-
-                "let monthSelects=selects.filter(s => {" +
-
-                " const opts=[...s.options]" +
-                "  .map(o => norm(o.textContent));" +
-
-                " return opts.some(x => x==='01' || x==='1')" +
-                " && opts.some(x => x==='12');" +
-
+                "frames.slice(0,10).forEach((f,i) => {" +
+                " send('IFRAME '+i+': '+(f.src||''));" +
                 "});" +
 
-                "if (monthSelects.length >= 2) {" +
+                // SELECT полета
+                "const selects=[...document.querySelectorAll('select')];" +
+                "send('SELECTS: '+selects.length);" +
 
-                " setSelectValue(monthSelects[0], '01');" +
-                " setSelectValue(monthSelects[1], '12');" +
+                "selects.slice(0,20).forEach((s,i) => {" +
 
-                "} else {" +
+                " const opts=[...s.options]" +
+                "  .slice(0,8)" +
+                "  .map(o =>" +
+                "   (o.textContent||'').trim()" +
+                "  ).join(' | ');" +
 
-                /*
-                 * Fallback за custom month dropdowns
-                 */
-                " clickText([" +
-                "  'January'," +
-                "  '01'," +
-                "  '1월'" +
-                " ]);" +
+                " send(" +
+                "  'SELECT '+i+': '" +
+                "  +describe(s)" +
+                "  +' OPTIONS=['+opts+']'" +
+                " );" +
+                "});" +
 
-                " await sleep(400);" +
+                // Диагностика за ключовите полета
+                "const labels=[" +
+                " 'Manufacturer'," +
+                " 'Model'," +
+                " 'Year'," +
+                " 'Mileage'," +
+                " 'Price'" +
+                "];" +
 
-                " clickText([" +
-                "  'December'," +
-                "  '12'," +
-                "  '12월'" +
-                " ]);" +
-                "}" +
+                "labels.forEach(label => {" +
 
-                "await sleep(700);" +
+                " send('');" +
+                " send('===== '+label+' =====');" +
 
-                // =========================================
-                // 5. SEARCH
-                // =========================================
+                " let matches=[..." +
+                " document.querySelectorAll('body *')" +
+                "].filter(el => {" +
 
-                "report(" +
-                " 'Търся '+BRAND+' '+MODEL+' '+YEAR+'...'" +
-                ");" +
+                " if (!visible(el)) return false;" +
 
-                "let searchButtons=[..." +
+                " const t=" +
+                "  (el.innerText || el.textContent || '')" +
+                "  .trim()" +
+                "  .replace(/\\s+/g,' ');" +
+
+                " return t===label" +
+                "  || t.startsWith(label+' ')" +
+                "  || t.includes(label);" +
+                "});" +
+
+                // По-малките елементи първи
+                "matches.sort((a,b) => {" +
+
+                " const ta=" +
+                "  (a.innerText||a.textContent||'').length;" +
+
+                " const tb=" +
+                "  (b.innerText||b.textContent||'').length;" +
+
+                " return ta-tb;" +
+                "});" +
+
+                "send('MATCHES: '+matches.length);" +
+
+                "matches.slice(0,6).forEach((el,i) => {" +
+
+                " send('MATCH '+i+': '+describe(el));" +
+
+                " let p=el.parentElement;" +
+
+                " for (let level=1;" +
+                "      level<=4 && p;" +
+                "      level++,p=p.parentElement) {" +
+
+                "  send(" +
+                "   '  PARENT '+level+': '" +
+                "   +describe(p)" +
+                "  );" +
+                " }" +
+                "});" +
+                "});" +
+
+                // Кликваеми елементи
+                "send('');" +
+                "send('===== CLICKABLE ELEMENTS =====');" +
+
+                "let clickable=[..." +
                 " document.querySelectorAll(" +
-                " 'button,[role=\"button\"],a'" +
+                "  'button,a,[role=\"button\"],input,label'" +
                 " )" +
-                "].filter(visible)" +
-                ".filter(el =>" +
-                " norm(el.innerText || el.textContent)" +
-                " .includes('search')" +
-                ");" +
+                "].filter(visible);" +
 
-                "searchButtons.sort((a,b) =>" +
-                " (a.innerText || '').length -" +
-                " (b.innerText || '').length" +
-                ");" +
+                "send('CLICKABLE COUNT: '+clickable.length);" +
 
-                "if (searchButtons.length) {" +
+                "clickable.slice(0,80).forEach((el,i) => {" +
 
-                " let button=searchButtons[0];" +
+                " const text=" +
+                "  (el.innerText || el.value || el.textContent || '')" +
+                "  .trim()" +
+                "  .replace(/\\s+/g,' ');" +
 
-                " button.scrollIntoView({" +
-                "  block:'center'" +
-                " });" +
+                " if (" +
+                "  text.includes('Manufacturer')" +
+                "  || text.includes('Model')" +
+                "  || text.includes('Year')" +
+                "  || text.includes('Search')" +
+                " ) {" +
 
-                " button.click();" +
+                "  send(" +
+                "   'CLICK '+i+': '+describe(el)" +
+                "  );" +
+                " }" +
+                "});" +
 
-                " report('Търсенето е стартирано.');" +
+                "send('');" +
+                "send('=== END ===');" +
 
-                "} else {" +
-
-                " report('Не намерих бутона Search.');" +
-                "}" +
+                "AndroidBridge.done();" +
 
                 "})();";
 
@@ -809,47 +605,120 @@ public class MainActivity extends Activity {
         );
     }
 
-    // =========================================================
-    // JAVASCRIPT -> ANDROID STATUS
-    // =========================================================
+    // =====================================================
+    // JAVASCRIPT BRIDGE
+    // =====================================================
 
     public class EncarBridge {
 
         @JavascriptInterface
-        public void report(
-                final String message
-        ) {
+        public void clear() {
 
-            runOnUiThread(() ->
-                    statusValue.setText(
-                            message
-                    )
-            );
+            synchronized (diagnosticText) {
+                diagnosticText.setLength(0);
+            }
+        }
+
+        @JavascriptInterface
+        public void report(String message) {
+
+            synchronized (diagnosticText) {
+
+                if (diagnosticText.length() < 30000) {
+
+                    diagnosticText
+                            .append(message)
+                            .append("\n");
+                }
+            }
+        }
+
+        @JavascriptInterface
+        public void done() {
+
+            runOnUiThread(() -> {
+
+                statusValue.setText(
+                        "Диагностиката е готова."
+                );
+
+                showDiagnosticDialog();
+            });
         }
     }
 
-    // =========================================================
-    // ESCAPE ЗА JAVASCRIPT
-    // =========================================================
+    // =====================================================
+    // ПОКАЗВАНЕ НА РЕЗУЛТАТА
+    // =====================================================
 
-    private String escapeJs(
-            String value
-    ) {
+    private void showDiagnosticDialog() {
 
-        if (value == null) {
-            return "";
+        String result;
+
+        synchronized (diagnosticText) {
+            result = diagnosticText.toString();
         }
 
-        return value
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\n", " ")
-                .replace("\r", " ");
+        TextView textView = new TextView(this);
+
+        textView.setText(result);
+        textView.setTextSize(12);
+        textView.setTextColor(Color.BLACK);
+        textView.setPadding(24, 20, 24, 20);
+        textView.setTextIsSelectable(true);
+        textView.setMovementMethod(
+                new ScrollingMovementMethod()
+        );
+
+        ScrollView scrollView =
+                new ScrollView(this);
+
+        scrollView.addView(textView);
+
+        AlertDialog dialog =
+                new AlertDialog.Builder(this)
+                        .setTitle("ENCAR диагностика")
+                        .setView(scrollView)
+
+                        .setPositiveButton(
+                                "КОПИРАЙ",
+                                (d, which) -> {
+
+                                    ClipboardManager clipboard =
+                                            (ClipboardManager)
+                                                    getSystemService(
+                                                            Context.CLIPBOARD_SERVICE
+                                                    );
+
+                                    ClipData clip =
+                                            ClipData.newPlainText(
+                                                    "Encar diagnostics",
+                                                    result
+                                            );
+
+                                    clipboard.setPrimaryClip(clip);
+
+                                    Toast.makeText(
+                                            this,
+                                            "Диагностиката е копирана.",
+                                            Toast.LENGTH_LONG
+                                    ).show();
+                                }
+                        )
+
+                        .setNegativeButton(
+                                "ЗАТВОРИ",
+                                null
+                        )
+
+                        .create();
+
+        dialog.show();
     }
 
-    // =========================================================
+    // =====================================================
     // BACK
-    // =========================================================
+    // =====================================================
 
     @Override
     public void onBackPressed() {
