@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -21,70 +22,121 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         LinearLayout root = new LinearLayout(this);
+
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
         root.setPadding(40, 40, 40, 40);
         root.setBackgroundColor(Color.WHITE);
 
+        // Заглавие
         TextView title = new TextView(this);
+
         title.setText("ENCAR VOICE SEARCH");
         title.setTextSize(22);
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
 
-        root.addView(
-                title,
+        LinearLayout.LayoutParams titleParams =
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                );
+
+        titleParams.setMargins(
+                0,
+                0,
+                0,
+                40
         );
 
+        root.addView(
+                title,
+                titleParams
+        );
+
+        // Статус
         statusText = new TextView(this);
-        statusText.setText("Тест за директно отваряне на Encar");
+
+        statusText.setText(
+                "Тест: отваряне на официалното Encar приложение чрез линк"
+        );
+
         statusText.setTextSize(16);
+        statusText.setTextColor(Color.DKGRAY);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 40, 0, 30);
 
-        root.addView(statusText);
+        LinearLayout.LayoutParams statusParams =
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                );
 
+        statusParams.setMargins(
+                0,
+                0,
+                0,
+                30
+        );
+
+        root.addView(
+                statusText,
+                statusParams
+        );
+
+        // Бутон
         Button openButton = new Button(this);
+
         openButton.setText("ОТВОРИ ENCAR");
         openButton.setTextSize(18);
 
-        root.addView(
-                openButton,
+        LinearLayout.LayoutParams buttonParams =
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                );
+
+        root.addView(
+                openButton,
+                buttonParams
         );
 
-        openButton.setOnClickListener(v -> openEncar());
+        openButton.setOnClickListener(
+                v -> openEncar()
+        );
 
         setContentView(root);
     }
 
     private void openEncar() {
 
-        Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.addCategory(Intent.CATEGORY_LAUNCHER);
-        intent.setPackage("com.encar.encarMobileApp");
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
         try {
+
+            Uri encarUri =
+                    Uri.parse(
+                            "https://car.encar.com/"
+                    );
+
+            Intent intent =
+                    new Intent(
+                            Intent.ACTION_VIEW,
+                            encarUri
+                    );
 
             startActivity(intent);
 
-            statusText.setText("Отварям Encar...");
+            statusText.setText(
+                    "Подавам линка към Encar..."
+            );
 
         } catch (ActivityNotFoundException e) {
 
-            statusText.setText("Не успях да стартирам Encar.");
+            statusText.setText(
+                    "Не успях да отворя Encar."
+            );
 
             Toast.makeText(
                     this,
-                    "Encar не можа да бъде стартирано.",
+                    "Няма приложение, което може да отвори Encar.",
                     Toast.LENGTH_LONG
             ).show();
         }
