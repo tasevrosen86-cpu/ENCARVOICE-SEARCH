@@ -6,40 +6,31 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
-public class EncarAccessibilityService
-        extends AccessibilityService {
+public class EncarAccessibilityService extends AccessibilityService {
 
     private long lastMessageTime = 0;
 
     @Override
-    public void onAccessibilityEvent(
-            AccessibilityEvent event
-    ) {
+    public void onAccessibilityEvent(AccessibilityEvent event) {
 
-        AccessibilityNodeInfo root =
-                getRootInActiveWindow();
+        AccessibilityNodeInfo root = getRootInActiveWindow();
 
         if (root == null) {
             return;
         }
 
-        AccessibilityNodeInfo searchField =
-                findSearchField(root);
+        AccessibilityNodeInfo searchField = findSearchField(root);
 
         if (searchField != null) {
 
-            long now =
-                    System.currentTimeMillis();
+            long now = System.currentTimeMillis();
 
             if (now - lastMessageTime > 3000) {
 
                 lastMessageTime = now;
 
                 Rect bounds = new Rect();
-
-                searchField.getBoundsInScreen(
-                        bounds
-                );
+                searchField.getBoundsInScreen(bounds);
 
                 Toast.makeText(
                         this,
@@ -51,3 +42,27 @@ public class EncarAccessibilityService
             }
         }
     }
+
+    private AccessibilityNodeInfo findSearchField(
+            AccessibilityNodeInfo node
+    ) {
+
+        if (node == null) {
+            return null;
+        }
+
+        CharSequence className = node.getClassName();
+        CharSequence text = node.getText();
+        CharSequence description = node.getContentDescription();
+
+        if (className != null &&
+                className.toString().contains("EditText")) {
+
+            return node;
+        }
+
+        String combined =
+                ((text != null ? text.toString() : "")
+                        + " "
+                        + (description != null
+                       
