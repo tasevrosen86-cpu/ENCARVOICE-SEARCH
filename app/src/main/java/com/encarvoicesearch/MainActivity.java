@@ -72,4 +72,4 @@ public class MainActivity extends Activity {
 
         // Бутон за глас
         Button voiceButton = new Button(this);
-        voiceButton.setText("🎤 ГЛ
+        voiceButton.setText("ГЛАС");
