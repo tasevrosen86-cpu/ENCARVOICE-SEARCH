@@ -52,9 +52,9 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
 
-        // =========================
+        // =========================================
         // ГОРЕН ПАНЕЛ
-        // =========================
+        // =========================================
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -66,31 +66,33 @@ public class MainActivity extends Activity {
         title.setTextSize(18);
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
+        title.setPadding(0, 0, 0, 8);
 
         panel.addView(title);
 
-        brandValue = makeText("Марка: -");
-        modelValue = makeText("Модел: -");
-        yearValue = makeText("Година: -");
+        brandValue = createText("Марка: -");
+        modelValue = createText("Модел: -");
+        yearValue = createText("Година: -");
 
         panel.addView(brandValue);
         panel.addView(modelValue);
         panel.addView(yearValue);
 
         statusValue = new TextView(this);
-        statusValue.setText("Кажи например: Kia Sorento 2025");
+        statusValue.setText("Отвори Manufacturer и натисни ДИАГНОСТИКА");
         statusValue.setTextSize(13);
         statusValue.setTextColor(Color.DKGRAY);
         statusValue.setPadding(0, 8, 0, 8);
 
         panel.addView(statusValue);
 
-        // =========================
+        // =========================================
         // БУТОНИ
-        // =========================
+        // =========================================
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout buttonRow = new LinearLayout(this);
+        buttonRow.setOrientation(LinearLayout.HORIZONTAL);
+        buttonRow.setGravity(Gravity.CENTER);
 
         Button voiceButton = new Button(this);
         voiceButton.setText("ГЛАС");
@@ -107,10 +109,10 @@ public class MainActivity extends Activity {
 
         buttonParams.setMargins(5, 0, 5, 0);
 
-        buttons.addView(voiceButton, buttonParams);
-        buttons.addView(diagnosticButton, buttonParams);
+        buttonRow.addView(voiceButton, buttonParams);
+        buttonRow.addView(diagnosticButton, buttonParams);
 
-        panel.addView(buttons);
+        panel.addView(buttonRow);
 
         root.addView(
                 panel,
@@ -120,9 +122,9 @@ public class MainActivity extends Activity {
                 )
         );
 
-        // =========================
+        // =========================================
         // WEBVIEW
-        // =========================
+        // =========================================
 
         webView = new WebView(this);
 
@@ -145,41 +147,42 @@ public class MainActivity extends Activity {
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
 
+        webView.setWebViewClient(new WebViewClient());
+
         webView.addJavascriptInterface(
                 new EncarBridge(),
                 "AndroidBridge"
         );
 
-        webView.setWebViewClient(new WebViewClient());
-
+        // Директно ENCAR - без Google
         String encarUrl =
-                "https://m.encar.com/ca/search.do#!%7B%22type%22%3A%22car%22%2C%22action%22%3A%22(And.Hidden.N._.MultiViewHidden.N._.(Or.Separation.F._.Separation.B.)_.SellType.%EC%9D%BC%EB%B0%98._.CarType.A._.Mileage.range(..400000)._.Price.range(100..10000).)%22%2C%22toggle%22%3A%7B%7D%2C%22layer%22%3A%22%22%2C%22title%22%3A%22Mercedes-Benz%20GLE-Class%20W167(19%EB%85%84~%ED%98%84%EC%9E%AC)%22%2C%22sort%22%3A%22MobilePriceAsc%22%2C%22cursor%22%3A%22%22%7D";
+                "https://m.encar.com/ca/search.do#!%7B%22type%22%3A%22car%22%2C%22action%22%3A%22(And.Hidden.N._.MultiViewHidden.N._.(Or.Separation.F._.Separation.B.)_.SellType.%EC%9D%BC%EB%B0%98._.CarType.A._.Mileage.range(..400000)._.Price.range(100..10000).)%22%2C%22toggle%22%3A%7B%7D%2C%22layer%22%3A%22%22%2C%22title%22%3A%22Mercedes-Benz%20GLE-Class%20W167(19%EB%85%84~%ED%98%84%EC%9E%AC)%22%2C%22sort%22%3A%22ModifiedDate%22%2C%22cursor%22%3A%22%22%7D";
 
         webView.loadUrl(encarUrl);
 
-        // =========================
+        // =========================================
         // ГЛАС
-        // =========================
+        // =========================================
 
         voiceButton.setOnClickListener(v ->
                 startVoiceRecognition()
         );
 
-        // =========================
+        // =========================================
         // ДИАГНОСТИКА
-        // =========================
+        // =========================================
 
         diagnosticButton.setOnClickListener(v -> {
 
             statusValue.setText(
-                    "Чета структурата на Encar..."
+                    "Чета Manufacturer структурата..."
             );
 
             runDiagnostics();
         });
     }
 
-    private TextView makeText(String text) {
+    private TextView createText(String text) {
 
         TextView view = new TextView(this);
 
@@ -191,9 +194,9 @@ public class MainActivity extends Activity {
         return view;
     }
 
-    // =====================================================
-    // ГЛАС
-    // =====================================================
+    // =========================================
+    // ГЛАСОВО РАЗПОЗНАВАНЕ
+    // =========================================
 
     private void startVoiceRecognition() {
 
@@ -256,8 +259,7 @@ public class MainActivity extends Activity {
                             RecognizerIntent.EXTRA_RESULTS
                     );
 
-            if (results != null
-                    && !results.isEmpty()) {
+            if (results != null && !results.isEmpty()) {
 
                 String spokenText = results.get(0);
 
@@ -278,17 +280,17 @@ public class MainActivity extends Activity {
 
         String text = spokenText.trim();
 
-        Matcher matcher =
+        String yearToken = "";
+
+        Matcher fullYear =
                 Pattern.compile(
                         "\\b(19\\d{2}|20\\d{2})\\b"
                 ).matcher(text);
 
-        String yearToken = "";
+        if (fullYear.find()) {
 
-        if (matcher.find()) {
-
-            selectedYear = matcher.group(1);
-            yearToken = matcher.group();
+            selectedYear = fullYear.group(1);
+            yearToken = fullYear.group();
 
         } else {
 
@@ -375,20 +377,20 @@ public class MainActivity extends Activity {
 
             selectedBrand = words[0];
 
-            StringBuilder model =
+            StringBuilder modelBuilder =
                     new StringBuilder();
 
             for (int i = 1; i < words.length; i++) {
 
                 if (i > 1) {
-                    model.append(" ");
+                    modelBuilder.append(" ");
                 }
 
-                model.append(words[i]);
+                modelBuilder.append(words[i]);
             }
 
             selectedModel =
-                    model.toString().trim();
+                    modelBuilder.toString().trim();
         }
 
         brandValue.setText(
@@ -410,9 +412,9 @@ public class MainActivity extends Activity {
         );
     }
 
-    // =====================================================
-    // DOM ДИАГНОСТИКА
-    // =====================================================
+    // =========================================
+    // MANUFACTURER ДИАГНОСТИКА
+    // =========================================
 
     private void runDiagnostics() {
 
@@ -430,7 +432,8 @@ public class MainActivity extends Activity {
                 " if (!el) return false;" +
                 " const r=el.getBoundingClientRect();" +
                 " const s=getComputedStyle(el);" +
-                " return r.width>0 && r.height>0" +
+                " return r.width>0" +
+                " && r.height>0" +
                 " && s.display!=='none'" +
                 " && s.visibility!=='hidden';" +
                 "}" +
@@ -439,155 +442,158 @@ public class MainActivity extends Activity {
 
                 " if (!el) return 'NULL';" +
 
-                " const r=el.getBoundingClientRect();" +
-
                 " const text=" +
-                "  (el.innerText || el.textContent || '')" +
-                "  .trim()" +
-                "  .replace(/\\s+/g,' ')" +
-                "  .slice(0,140);" +
+                " (el.innerText || el.textContent || '')" +
+                " .trim()" +
+                " .replace(/\\s+/g,' ')" +
+                " .slice(0,160);" +
 
                 " const cls=" +
-                "  (typeof el.className==='string'" +
-                "   ? el.className : '')" +
-                "  .slice(0,180);" +
+                " (typeof el.className==='string'" +
+                " ? el.className : '')" +
+                " .slice(0,160);" +
+
+                " const r=el.getBoundingClientRect();" +
 
                 " return '<'+el.tagName.toLowerCase()" +
-                "  +' id=\"'+(el.id||'')+'\"'" +
-                "  +' class=\"'+cls+'\"'" +
-                "  +' role=\"'+(el.getAttribute('role')||'')+'\"'" +
-                "  +' text=\"'+text+'\"'" +
-                "  +' rect='" +
-                "  +Math.round(r.left)+','" +
-                "  +Math.round(r.top)+','" +
-                "  +Math.round(r.width)+','" +
-                "  +Math.round(r.height)+'>';" +
+                " +' id=\"'+(el.id||'')+'\"'" +
+                " +' class=\"'+cls+'\"'" +
+                " +' href=\"'+(el.getAttribute('href')||'')+'\"'" +
+                " +' onclick=\"'+(el.getAttribute('onclick')||'')+'\"'" +
+                " +' data-value=\"'+(el.getAttribute('data-value')||'')+'\"'" +
+                " +' data-code=\"'+(el.getAttribute('data-code')||'')+'\"'" +
+                " +' data-manufact=\"'+(el.getAttribute('data-manufact')||'')+'\"'" +
+                " +' text=\"'+text+'\"'" +
+                " +' rect='" +
+                " +Math.round(r.left)+','" +
+                " +Math.round(r.top)+','" +
+                " +Math.round(r.width)+','" +
+                " +Math.round(r.height)+'>';" +
                 "}" +
 
                 "AndroidBridge.clear();" +
 
-                "send('ENCAR DOM DIAGNOSTICS');" +
+                "send('ENCAR MANUFACTURER DIAGNOSTICS');" +
                 "send('URL: '+location.href);" +
-                "send('TITLE: '+document.title);" +
                 "send('READY: '+document.readyState);" +
+                "send('');" +
 
-                // IFRAМЕ проверка
-                "const frames=[...document.querySelectorAll('iframe')];" +
-                "send('IFRAMES: '+frames.length);" +
+                "const layer=" +
+                " document.querySelector('#optManufact');" +
 
-                "frames.slice(0,10).forEach((f,i) => {" +
-                " send('IFRAME '+i+': '+(f.src||''));" +
+                "if (!layer) {" +
+
+                " send('ERROR: #optManufact NOT FOUND');" +
+                " send('Отвори Manufacturer ръчно и пусни диагностиката отново.');" +
+
+                " AndroidBridge.done();" +
+                " return;" +
+                "}" +
+
+                "send('FOUND: #optManufact');" +
+                "send('LAYER: '+describe(layer));" +
+                "send('');" +
+
+                // =====================================
+                // ВСИЧКИ CLICKABLE ЕЛЕМЕНТИ
+                // =====================================
+
+                "send('===== MANUFACTURER CLICKABLE ELEMENTS =====');" +
+
+                "const elements=[..." +
+                " layer.querySelectorAll(" +
+                " 'a,button,li,label,[role=\"button\"],input'" +
+                ")" +
+                "].filter(visible);" +
+
+                "send('ELEMENT COUNT: '+elements.length);" +
+
+                "elements.forEach((el,i) => {" +
+
+                " const text=" +
+                " (el.innerText || el.textContent || '')" +
+                " .trim()" +
+                " .replace(/\\s+/g,' ');" +
+
+                " if (text) {" +
+                "   send(i+': '+describe(el));" +
+                " }" +
                 "});" +
 
-                // SELECT полета
-                "const selects=[...document.querySelectorAll('select')];" +
-                "send('SELECTS: '+selects.length);" +
+                // =====================================
+                // KIA
+                // =====================================
 
-                "selects.slice(0,20).forEach((s,i) => {" +
+                "send('');" +
+                "send('===== KIA EXACT =====');" +
 
-                " const opts=[...s.options]" +
-                "  .slice(0,8)" +
-                "  .map(o =>" +
-                "   (o.textContent||'').trim()" +
-                "  ).join(' | ');" +
+                "const all=[...layer.querySelectorAll('*')];" +
 
-                " send(" +
-                "  'SELECT '+i+': '" +
-                "  +describe(s)" +
-                "  +' OPTIONS=['+opts+']'" +
-                " );" +
-                "});" +
-
-                // Диагностика за ключовите полета
-                "const labels=[" +
-                " 'Manufacturer'," +
-                " 'Model'," +
-                " 'Year'," +
-                " 'Mileage'," +
-                " 'Price'" +
-                "];" +
-
-                "labels.forEach(label => {" +
-
-                " send('');" +
-                " send('===== '+label+' =====');" +
-
-                " let matches=[..." +
-                " document.querySelectorAll('body *')" +
-                "].filter(el => {" +
-
-                " if (!visible(el)) return false;" +
+                "const kia=all.filter(el => {" +
 
                 " const t=" +
-                "  (el.innerText || el.textContent || '')" +
-                "  .trim()" +
-                "  .replace(/\\s+/g,' ');" +
+                " (el.innerText || el.textContent || '')" +
+                " .trim()" +
+                " .replace(/\\s+/g,' ');" +
 
-                " return t===label" +
-                "  || t.startsWith(label+' ')" +
-                "  || t.includes(label);" +
+                " return t==='Kia'" +
+                " || t.startsWith('Kia ');" +
                 "});" +
 
-                // По-малките елементи първи
-                "matches.sort((a,b) => {" +
+                "send('KIA MATCHES: '+kia.length);" +
 
-                " const ta=" +
-                "  (a.innerText||a.textContent||'').length;" +
+                "kia.slice(0,15).forEach((el,i) => {" +
 
-                " const tb=" +
-                "  (b.innerText||b.textContent||'').length;" +
-
-                " return ta-tb;" +
-                "});" +
-
-                "send('MATCHES: '+matches.length);" +
-
-                "matches.slice(0,6).forEach((el,i) => {" +
-
-                " send('MATCH '+i+': '+describe(el));" +
+                " send('KIA '+i+': '+describe(el));" +
 
                 " let p=el.parentElement;" +
 
-                " for (let level=1;" +
-                "      level<=4 && p;" +
-                "      level++,p=p.parentElement) {" +
-
-                "  send(" +
-                "   '  PARENT '+level+': '" +
-                "   +describe(p)" +
-                "  );" +
-                " }" +
-                "});" +
-                "});" +
-
-                // Кликваеми елементи
-                "send('');" +
-                "send('===== CLICKABLE ELEMENTS =====');" +
-
-                "let clickable=[..." +
-                " document.querySelectorAll(" +
-                "  'button,a,[role=\"button\"],input,label'" +
-                " )" +
-                "].filter(visible);" +
-
-                "send('CLICKABLE COUNT: '+clickable.length);" +
-
-                "clickable.slice(0,80).forEach((el,i) => {" +
-
-                " const text=" +
-                "  (el.innerText || el.value || el.textContent || '')" +
-                "  .trim()" +
-                "  .replace(/\\s+/g,' ');" +
-
-                " if (" +
-                "  text.includes('Manufacturer')" +
-                "  || text.includes('Model')" +
-                "  || text.includes('Year')" +
-                "  || text.includes('Search')" +
+                " for (" +
+                " let level=1;" +
+                " level<=5 && p;" +
+                " level++,p=p.parentElement" +
                 " ) {" +
 
                 "  send(" +
-                "   'CLICK '+i+': '+describe(el)" +
+                "   '  PARENT '+level+': '+describe(p)" +
+                "  );" +
+                " }" +
+                "});" +
+
+                // =====================================
+                // GENESIS
+                // =====================================
+
+                "send('');" +
+                "send('===== GENESIS EXACT =====');" +
+
+                "const genesis=all.filter(el => {" +
+
+                " const t=" +
+                " (el.innerText || el.textContent || '')" +
+                " .trim()" +
+                " .replace(/\\s+/g,' ');" +
+
+                " return t==='GENESIS'" +
+                " || t.startsWith('GENESIS ');" +
+                "});" +
+
+                "send('GENESIS MATCHES: '+genesis.length);" +
+
+                "genesis.slice(0,10).forEach((el,i) => {" +
+
+                " send('GENESIS '+i+': '+describe(el));" +
+
+                " let p=el.parentElement;" +
+
+                " for (" +
+                " let level=1;" +
+                " level<=4 && p;" +
+                " level++,p=p.parentElement" +
+                " ) {" +
+
+                "  send(" +
+                "   '  PARENT '+level+': '+describe(p)" +
                 "  );" +
                 " }" +
                 "});" +
@@ -605,9 +611,9 @@ public class MainActivity extends Activity {
         );
     }
 
-    // =====================================================
+    // =========================================
     // JAVASCRIPT BRIDGE
-    // =====================================================
+    // =========================================
 
     public class EncarBridge {
 
@@ -615,6 +621,7 @@ public class MainActivity extends Activity {
         public void clear() {
 
             synchronized (diagnosticText) {
+
                 diagnosticText.setLength(0);
             }
         }
@@ -624,7 +631,7 @@ public class MainActivity extends Activity {
 
             synchronized (diagnosticText) {
 
-                if (diagnosticText.length() < 30000) {
+                if (diagnosticText.length() < 50000) {
 
                     diagnosticText
                             .append(message)
@@ -639,7 +646,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
 
                 statusValue.setText(
-                        "Диагностиката е готова."
+                        "Manufacturer диагностиката е готова."
                 );
 
                 showDiagnosticDialog();
@@ -647,37 +654,42 @@ public class MainActivity extends Activity {
         }
     }
 
-    // =====================================================
-    // ПОКАЗВАНЕ НА РЕЗУЛТАТА
-    // =====================================================
+    // =========================================
+    // ПОКАЗВАНЕ НА ДИАГНОСТИКАТА
+    // =========================================
 
     private void showDiagnosticDialog() {
 
-        String result;
+        final String result;
 
         synchronized (diagnosticText) {
-            result = diagnosticText.toString();
+
+            result =
+                    diagnosticText.toString();
         }
 
-        TextView textView = new TextView(this);
+        TextView output = new TextView(this);
 
-        textView.setText(result);
-        textView.setTextSize(12);
-        textView.setTextColor(Color.BLACK);
-        textView.setPadding(24, 20, 24, 20);
-        textView.setTextIsSelectable(true);
-        textView.setMovementMethod(
+        output.setText(result);
+        output.setTextSize(12);
+        output.setTextColor(Color.BLACK);
+        output.setPadding(24, 20, 24, 20);
+        output.setTextIsSelectable(true);
+
+        output.setMovementMethod(
                 new ScrollingMovementMethod()
         );
 
         ScrollView scrollView =
                 new ScrollView(this);
 
-        scrollView.addView(textView);
+        scrollView.addView(output);
 
         AlertDialog dialog =
                 new AlertDialog.Builder(this)
-                        .setTitle("ENCAR диагностика")
+                        .setTitle(
+                                "Manufacturer диагностика"
+                        )
                         .setView(scrollView)
 
                         .setPositiveButton(
@@ -692,11 +704,13 @@ public class MainActivity extends Activity {
 
                                     ClipData clip =
                                             ClipData.newPlainText(
-                                                    "Encar diagnostics",
+                                                    "Encar manufacturer diagnostics",
                                                     result
                                             );
 
-                                    clipboard.setPrimaryClip(clip);
+                                    clipboard.setPrimaryClip(
+                                            clip
+                                    );
 
                                     Toast.makeText(
                                             this,
@@ -716,9 +730,9 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
-    // =====================================================
+    // =========================================
     // BACK
-    // =====================================================
+    // =========================================
 
     @Override
     public void onBackPressed() {
