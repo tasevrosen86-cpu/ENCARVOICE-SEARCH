@@ -19,9 +19,9 @@ public class EncarAccessibilityService extends AccessibilityService {
             return;
         }
 
-        AccessibilityNodeInfo searchField = findSearchField(root);
+        AccessibilityNodeInfo field = findSearchField(root);
 
-        if (searchField != null) {
+        if (field != null) {
 
             long now = System.currentTimeMillis();
 
@@ -29,14 +29,15 @@ public class EncarAccessibilityService extends AccessibilityService {
 
                 lastMessageTime = now;
 
-                Rect bounds = new Rect();
-                searchField.getBoundsInScreen(bounds);
+                Rect rect = new Rect();
+                field.getBoundsInScreen(rect);
 
                 Toast.makeText(
                         this,
-                        "Намерих поле в Encar!\n" +
-                                "X=" + bounds.left +
-                                " Y=" + bounds.top,
+                        "Намерих поле в Encar! X=" +
+                                rect.left +
+                                " Y=" +
+                                rect.top,
                         Toast.LENGTH_LONG
                 ).show();
             }
@@ -44,25 +45,70 @@ public class EncarAccessibilityService extends AccessibilityService {
     }
 
     private AccessibilityNodeInfo findSearchField(
-            AccessibilityNodeInfo node
-    ) {
+            AccessibilityNodeInfo node) {
 
         if (node == null) {
             return null;
         }
 
-        CharSequence className = node.getClassName();
-        CharSequence text = node.getText();
-        CharSequence description = node.getContentDescription();
+        String className = safe(node.getClassName());
+        String text = safe(node.getText());
+        String description = safe(node.getContentDescription());
 
-        if (className != null &&
-                className.toString().contains("EditText")) {
-
+        if (className.contains("EditText")) {
             return node;
         }
 
         String combined =
-                ((text != null ? text.toString() : "")
-                        + " "
-                        + (description != null
-                       
+                (text + " " + description).toLowerCase();
+
+        if (combined.contains("검색")
+                || combined.contains("차량 검색")
+                || combined.contains("search")) {
+
+            if (node.isClickable()
+                    || node.isFocusable()
+                    || node.isEditable()) {
+
+                return node;
+            }
+        }
+
+        for (int i = 0; i < node.getChildCount(); i++) {
+
+            AccessibilityNodeInfo result =
+                    findSearchField(node.getChild(i));
+
+            if (result != null) {
+                return result;
+            }
+        }
+
+        return null;
+    }
+
+    private String safe(CharSequence value) {
+
+        if (value == null) {
+            return "";
+        }
+
+        return value.toString();
+    }
+
+    @Override
+    public void onInterrupt() {
+    }
+
+    @Override
+    protected void onServiceConnected() {
+
+        super.onServiceConnected();
+
+        Toast.makeText(
+                this,
+                "ENCAR Accessibility е активиран",
+                Toast.LENGTH_LONG
+        ).show();
+    }
+}
