@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
                 String modelGroup,
                 String exactModel
         ) {
+
             this.displayName = displayName;
             this.manufacturer = manufacturer;
             this.modelGroup = modelGroup;
@@ -100,12 +101,14 @@ public class MainActivity extends Activity {
                 15
         );
 
+
         LinearLayout buttons =
                 new LinearLayout(this);
 
         buttons.setOrientation(
                 LinearLayout.HORIZONTAL
         );
+
 
         Button voiceButton =
                 new Button(this);
@@ -114,6 +117,7 @@ public class MainActivity extends Activity {
                 "🎤 ГЛАС"
         );
 
+
         Button searchButton =
                 new Button(this);
 
@@ -121,12 +125,14 @@ public class MainActivity extends Activity {
                 "🔎 ТЪРСИ"
         );
 
+
         LinearLayout.LayoutParams buttonParams =
                 new LinearLayout.LayoutParams(
                         0,
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         1
                 );
+
 
         buttons.addView(
                 voiceButton,
@@ -137,6 +143,7 @@ public class MainActivity extends Activity {
                 searchButton,
                 buttonParams
         );
+
 
         status =
                 new TextView(this);
@@ -156,12 +163,14 @@ public class MainActivity extends Activity {
 
         status.setTextIsSelectable(true);
 
+
         LinearLayout tools =
                 new LinearLayout(this);
 
         tools.setOrientation(
                 LinearLayout.HORIZONTAL
         );
+
 
         Button readButton =
                 new Button(this);
@@ -170,12 +179,14 @@ public class MainActivity extends Activity {
                 "ПЪРВА ОБЯВА"
         );
 
+
         Button openButton =
                 new Button(this);
 
         openButton.setText(
                 "ОТВОРИ"
         );
+
 
         Button copyButton =
                 new Button(this);
@@ -184,12 +195,14 @@ public class MainActivity extends Activity {
                 "КОПИРАЙ"
         );
 
+
         LinearLayout.LayoutParams toolParams =
                 new LinearLayout.LayoutParams(
                         0,
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         1
                 );
+
 
         tools.addView(
                 readButton,
@@ -206,8 +219,10 @@ public class MainActivity extends Activity {
                 toolParams
         );
 
+
         webView =
                 new WebView(this);
+
 
         WebSettings settings =
                 webView.getSettings();
@@ -219,9 +234,11 @@ public class MainActivity extends Activity {
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
 
+
         CookieManager
                 .getInstance()
                 .setAcceptCookie(true);
+
 
         CookieManager
                 .getInstance()
@@ -230,10 +247,12 @@ public class MainActivity extends Activity {
                         true
                 );
 
+
         webView.addJavascriptInterface(
                 new CarReader(),
                 "AndroidCarReader"
         );
+
 
         webView.setWebViewClient(
                 new WebViewClient() {
@@ -250,7 +269,8 @@ public class MainActivity extends Activity {
                         );
 
                         if (
-                                url != null &&
+                                url != null
+                                        &&
                                 url.contains(
                                         "car.encar.com/list/car"
                                 )
@@ -269,6 +289,7 @@ public class MainActivity extends Activity {
                 }
         );
 
+
         root.addView(
                 searchInput,
                 new LinearLayout.LayoutParams(
@@ -276,6 +297,7 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT
                 )
         );
+
 
         root.addView(
                 buttons,
@@ -285,6 +307,7 @@ public class MainActivity extends Activity {
                 )
         );
 
+
         root.addView(
                 status,
                 new LinearLayout.LayoutParams(
@@ -293,6 +316,7 @@ public class MainActivity extends Activity {
                 )
         );
 
+
         root.addView(
                 tools,
                 new LinearLayout.LayoutParams(
@@ -300,6 +324,7 @@ public class MainActivity extends Activity {
                         ViewGroup.LayoutParams.WRAP_CONTENT
                 )
         );
+
 
         root.addView(
                 webView,
@@ -310,28 +335,35 @@ public class MainActivity extends Activity {
                 )
         );
 
+
         setContentView(root);
+
 
         voiceButton.setOnClickListener(
                 v -> startVoice()
         );
 
+
         searchButton.setOnClickListener(
                 v -> searchFromInput()
         );
+
 
         readButton.setOnClickListener(
                 v -> startReading()
         );
 
+
         openButton.setOnClickListener(
                 v -> openFirstCar()
         );
+
 
         copyButton.setOnClickListener(
                 v -> copyResult()
         );
     }
+
 
     private void startVoice() {
 
@@ -340,20 +372,24 @@ public class MainActivity extends Activity {
                         RecognizerIntent.ACTION_RECOGNIZE_SPEECH
                 );
 
+
         intent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
         );
+
 
         intent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE,
                 "bg-BG"
         );
 
+
         intent.putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
                 "Кажи марка, модел, година и гориво"
         );
+
 
         try {
 
@@ -374,6 +410,7 @@ public class MainActivity extends Activity {
         }
     }
 
+
     @Override
     @SuppressWarnings("deprecation")
     protected void onActivityResult(
@@ -388,9 +425,12 @@ public class MainActivity extends Activity {
                 data
         );
 
+
         if (
-                requestCode == VOICE_REQUEST &&
-                resultCode == RESULT_OK &&
+                requestCode == VOICE_REQUEST
+                        &&
+                resultCode == RESULT_OK
+                        &&
                 data != null
         ) {
 
@@ -399,13 +439,16 @@ public class MainActivity extends Activity {
                             RecognizerIntent.EXTRA_RESULTS
                     );
 
+
             if (
-                    results != null &&
+                    results != null
+                            &&
                     !results.isEmpty()
             ) {
 
                 String text =
                         results.get(0);
+
 
                 text =
                         text.replaceAll(
@@ -413,7 +456,11 @@ public class MainActivity extends Activity {
                                 "20$1"
                         );
 
-                searchInput.setText(text);
+
+                searchInput.setText(
+                        text
+                );
+
 
                 searchInput.setSelection(
                         searchInput
@@ -424,6 +471,7 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private void searchFromInput() {
 
         String original =
@@ -432,7 +480,10 @@ public class MainActivity extends Activity {
                         .toString()
                         .trim();
 
-        if (original.isEmpty()) {
+
+        if (
+                original.isEmpty()
+        ) {
 
             status.setText(
                     "Кажи или напиши автомобил."
@@ -440,6 +491,7 @@ public class MainActivity extends Activity {
 
             return;
         }
+
 
         String text =
                 original
@@ -451,24 +503,16 @@ public class MainActivity extends Activity {
                                 " "
                         );
 
-        CarSearchSpec car =
-                detectCar(text);
-
-        if (car == null) {
-
-            status.setText(
-                    "Засега разпознавам:\n" +
-                    "• Kia Sorento\n" +
-                    "• Hyundai Palisade"
-            );
-
-            return;
-        }
 
         Integer year =
-                findYear(text);
+                findYear(
+                        text
+                );
 
-        if (year == null) {
+
+        if (
+                year == null
+        ) {
 
             status.setText(
                     "Не разпознах годината."
@@ -477,11 +521,14 @@ public class MainActivity extends Activity {
             return;
         }
 
+
         String fuelKorean;
         String fuelName;
 
+
         if (
-                text.contains("дизел") ||
+                text.contains("дизел")
+                        ||
                 text.contains("diesel")
         ) {
 
@@ -492,19 +539,8 @@ public class MainActivity extends Activity {
                     "DIESEL";
 
         } else if (
-                text.contains("бензин") ||
-                text.contains("gasoline") ||
-                text.contains("petrol")
-        ) {
-
-            fuelKorean =
-                    "가솔린";
-
-            fuelName =
-                    "GASOLINE";
-
-        } else if (
-                text.contains("хибрид") ||
+                text.contains("хибрид")
+                        ||
                 text.contains("hybrid")
         ) {
 
@@ -513,6 +549,20 @@ public class MainActivity extends Activity {
 
             fuelName =
                     "HYBRID";
+
+        } else if (
+                text.contains("бензин")
+                        ||
+                text.contains("gasoline")
+                        ||
+                text.contains("petrol")
+        ) {
+
+            fuelKorean =
+                    "가솔린";
+
+            fuelName =
+                    "GASOLINE";
 
         } else {
 
@@ -524,6 +574,64 @@ public class MainActivity extends Activity {
             return;
         }
 
+
+        CarSearchSpec car =
+                detectCar(
+                        text,
+                        year
+                );
+
+
+        if (
+                car == null
+        ) {
+
+            status.setText(
+                    "Засега разпознавам:\n" +
+                    "• Kia Sorento\n" +
+                    "• Hyundai Palisade"
+            );
+
+            return;
+        }
+
+
+        /*
+         * Новият Palisade LX3 няма дизел.
+         */
+        if (
+                car.displayName.contains("Palisade LX3")
+                        &&
+                fuelKorean.equals("디젤")
+        ) {
+
+            status.setText(
+                    "Palisade LX3 няма дизел.\n" +
+                    "За новия модел избери бензин или хибрид."
+            );
+
+            return;
+        }
+
+
+        /*
+         * Старият Palisade няма хибрид.
+         */
+        if (
+                car.displayName.contains("Palisade old")
+                        &&
+                fuelKorean.equals("가솔린+전기")
+        ) {
+
+            status.setText(
+                    "Старият Palisade няма хибрид.\n" +
+                    "За тази година избери дизел или бензин."
+            );
+
+            return;
+        }
+
+
         searchCar(
                 car,
                 year,
@@ -532,20 +640,31 @@ public class MainActivity extends Activity {
         );
     }
 
+
     private CarSearchSpec detectCar(
-            String text
+            String text,
+            int year
     ) {
 
         boolean kia =
-                text.contains("kia") ||
-                text.contains("киа") ||
+                text.contains("kia")
+                        ||
+                text.contains("киа")
+                        ||
                 text.contains("кия");
 
+
         boolean sorento =
-                text.contains("sorento") ||
+                text.contains("sorento")
+                        ||
                 text.contains("соренто");
 
-        if (kia && sorento) {
+
+        if (
+                kia
+                        &&
+                sorento
+        ) {
 
             return new CarSearchSpec(
                     "Kia Sorento",
@@ -555,30 +674,86 @@ public class MainActivity extends Activity {
             );
         }
 
+
         boolean hyundai =
-                text.contains("hyundai") ||
-                text.contains("хюндай") ||
-                text.contains("хундай") ||
-                text.contains("хендай") ||
+                text.contains("hyundai")
+                        ||
+                text.contains("хюндай")
+                        ||
+                text.contains("хундай")
+                        ||
+                text.contains("хендай")
+                        ||
                 text.contains("хюнде");
 
+
         boolean palisade =
-                text.contains("palisade") ||
-                text.contains("палисейд") ||
-                text.contains("палисад");
+                text.contains("palisade")
+                        ||
+                text.contains("палисейд")
+                        ||
+                text.contains("палисад")
+                        ||
+                text.contains("палисейд");
 
-        if (hyundai && palisade) {
 
+        if (
+                hyundai
+                        &&
+                palisade
+        ) {
+
+            /*
+             * 2025+:
+             * новото поколение LX3.
+             *
+             * Това е точният вътрешен Encar Model token.
+             */
+            if (
+                    year >= 2025
+            ) {
+
+                return new CarSearchSpec(
+                        "Hyundai Palisade LX3",
+                        "현대",
+                        "팰리세이드",
+                        "팰리세이드 (LX3_)"
+                );
+            }
+
+
+            /*
+             * 2022–2024:
+             * facelift старото поколение.
+             */
+            if (
+                    year >= 2022
+            ) {
+
+                return new CarSearchSpec(
+                        "Hyundai Palisade old",
+                        "현대",
+                        "팰리세이드",
+                        "더 뉴 팰리세이드"
+                );
+            }
+
+
+            /*
+             * По-старият Palisade.
+             */
             return new CarSearchSpec(
                     "Hyundai Palisade",
                     "현대",
                     "팰리세이드",
-                    null
+                    "팰리세이드"
             );
         }
 
+
         return null;
     }
+
 
     private Integer findYear(
             String text
@@ -590,13 +765,19 @@ public class MainActivity extends Activity {
                         "20$1"
                 );
 
+
         Matcher full =
                 Pattern.compile(
                         "\\b(20\\d{2})\\b"
                 )
-                        .matcher(text);
+                        .matcher(
+                                text
+                        );
 
-        if (full.find()) {
+
+        if (
+                full.find()
+        ) {
 
             try {
 
@@ -610,17 +791,24 @@ public class MainActivity extends Activity {
             }
         }
 
+
         Matcher shortYear =
                 Pattern.compile(
                         "\\b(1[5-9]|2[0-6])\\s*(?:г|година|год)?\\b"
                 )
-                        .matcher(text);
+                        .matcher(
+                                text
+                        );
 
-        if (shortYear.find()) {
+
+        if (
+                shortYear.find()
+        ) {
 
             try {
 
-                return 2000 +
+                return 2000
+                        +
                         Integer.parseInt(
                                 shortYear.group(1)
                         );
@@ -631,8 +819,10 @@ public class MainActivity extends Activity {
             }
         }
 
+
         return null;
     }
+
 
     private void searchCar(
             CarSearchSpec car,
@@ -644,142 +834,160 @@ public class MainActivity extends Activity {
         int yearFrom =
                 year * 100;
 
+
         int yearTo =
                 yearFrom + 99;
 
+
         StringBuilder action =
                 new StringBuilder();
+
 
         action.append(
                 "(And.Year.range("
         );
 
+
         action.append(
                 yearFrom
         );
+
 
         action.append(
                 ".."
         );
 
+
         action.append(
                 yearTo
         );
+
 
         action.append(
                 ")."
         );
 
+
         action.append(
                 "_.Hidden.N."
         );
+
 
         action.append(
                 "_." +
                 "(Or.Separation.F._.Separation.B.)"
         );
 
+
         action.append(
                 "_.SellType.일반."
         );
+
 
         action.append(
                 "_.(C.CarType.Y."
         );
 
+
         action.append(
                 "_.(C.Manufacturer."
         );
+
 
         action.append(
                 car.manufacturer
         );
 
+
         action.append(
                 "."
         );
+
 
         action.append(
                 "_.(C.ModelGroup."
         );
 
+
         action.append(
                 car.modelGroup
         );
+
 
         action.append(
                 "."
         );
 
-        /*
-         * Sorento:
-         * запазваме точно доказано
-         * работещия Model.
-         *
-         * Palisade:
-         * не гадаем Model поколението.
-         */
-        if (
-                car.exactModel != null &&
-                !car.exactModel.isEmpty()
-        ) {
 
-            action.append(
-                    "_.Model."
-            );
+        action.append(
+                "_.Model."
+        );
 
-            action.append(
-                    car.exactModel
-            );
 
-            action.append(
-                    "."
-            );
-        }
+        action.append(
+                car.exactModel
+        );
+
+
+        action.append(
+                "."
+        );
+
 
         action.append(
                 ")"
         );
 
-        action.append(
-                ")"
-        );
 
         action.append(
                 ")"
         );
+
+
+        action.append(
+                ")"
+        );
+
 
         action.append(
                 "_.FuelType."
         );
 
+
         action.append(
                 fuel
         );
+
 
         action.append(
                 "."
         );
 
+
         action.append(
                 ")"
         );
 
+
         String json =
-                "{" +
-                "\"type\":\"car\"," +
-
-                "\"action\":\"" +
-                action +
-                "\"," +
-
-                "\"toggle\":{}," +
-
-                "\"layer\":\"\"," +
-
-                "\"sort\":\"MobilePriceAsc\"" +
-
+                "{"
+                        +
+                "\"type\":\"car\","
+                        +
+                "\"action\":\""
+                        +
+                action
+                        +
+                "\","
+                        +
+                "\"toggle\":{},"
+                        +
+                "\"layer\":\"\","
+                        +
+                "\"sort\":\"MobilePriceAsc\""
+                        +
                 "}";
+
 
         try {
 
@@ -789,174 +997,277 @@ public class MainActivity extends Activity {
                             StandardCharsets.UTF_8.toString()
                     );
 
+
             String url =
-                    "https://car.encar.com/list/car?page=1&search=" +
+                    "https://car.encar.com/list/car?page=1&search="
+                            +
                     encoded;
+
 
             lastResult = "";
             lastCarUrl = "";
 
+
             status.setText(
-                    "Търся " +
-                    car.displayName +
-                    " " +
-                    year +
-                    " " +
-                    fuelName +
+                    "Търся "
+                            +
+                    car.displayName
+                            +
+                    " "
+                            +
+                    year
+                            +
+                    " "
+                            +
+                    fuelName
+                            +
                     "\nНАЙ-НИСКА ЦЕНА ПЪРВО"
             );
 
-            webView.loadUrl(url);
+
+            webView.loadUrl(
+                    url
+            );
+
 
         } catch (
                 Exception e
         ) {
 
             status.setText(
-                    "Грешка при търсене: " +
+                    "Грешка при търсене: "
+                            +
                     e.getMessage()
             );
         }
     }
 
+
     private void startReading() {
 
         readAttempts = 0;
+
 
         status.setText(
                 "Търся първата реална обява..."
         );
 
+
         readFirstCar();
     }
+
 
     private void readFirstCar() {
 
         readAttempts++;
 
+
         String script =
-                "(function(){" +
+                "(function(){"
+                        +
 
-                "var links=Array.from(" +
-                "document.querySelectorAll(" +
-                "'a[href*=\"/cars/detail/\"]'" +
-                ")" +
-                ");" +
+                "var links=Array.from("
+                        +
+                "document.querySelectorAll("
+                        +
+                "'a[href*=\"/cars/detail/\"]'"
+                        +
+                ")"
+                        +
+                ");"
+                        +
 
-                "var car=links.find(function(a){" +
+                "var car=links.find(function(a){"
+                        +
 
-                "var txt=(a.innerText||a.textContent||'')" +
-                ".replace(/\\\\s+/g,' ')" +
-                ".trim();" +
+                "var txt=(a.innerText||a.textContent||'')"
+                        +
+                ".replace(/\\\\s+/g,' ')"
+                        +
+                ".trim();"
+                        +
 
-                "if(txt.length<15)return false;" +
+                "if(txt.length<15)return false;"
+                        +
 
-                "if(a.classList.contains('sponsored_type'))" +
-                "return false;" +
+                "if(a.classList.contains('sponsored_type'))"
+                        +
+                "return false;"
+                        +
 
-                "var p=a.parentElement;" +
+                "var p=a.parentElement;"
+                        +
 
-                "while(p){" +
+                "while(p){"
+                        +
 
-                "if(p.classList&&" +
-                "p.classList.contains('sponsored_type'))" +
-                "return false;" +
+                "if(p.classList&&"
+                        +
+                "p.classList.contains('sponsored_type'))"
+                        +
+                "return false;"
+                        +
 
-                "p=p.parentElement;" +
-                "}" +
+                "p=p.parentElement;"
+                        +
 
-                "return true;" +
+                "}"
+                        +
 
-                "});" +
+                "return true;"
+                        +
 
-                "if(!car){" +
+                "});"
+                        +
 
-                "AndroidCarReader.receiveCar(" +
-                "JSON.stringify({" +
-                "error:'NO_CAR_FOUND'" +
-                "})" +
-                ");" +
+                "if(!car){"
+                        +
 
-                "return;" +
-                "}" +
+                "AndroidCarReader.receiveCar("
+                        +
+                "JSON.stringify({"
+                        +
+                "error:'NO_CAR_FOUND'"
+                        +
+                "})"
+                        +
+                ");"
+                        +
 
-                "var text=" +
-                "(car.innerText||car.textContent||'')" +
-                ".replace(/\\\\s+/g,' ')" +
-                ".trim();" +
+                "return;"
+                        +
 
-                "var mileage=" +
-                "text.match(/([0-9][0-9,]*)\\\\s*km/i);" +
+                "}"
+                        +
 
-                "var krw=" +
-                "text.match(/([0-9][0-9,]*)\\\\s*만원/);" +
+                "var text="
+                        +
+                "(car.innerText||car.textContent||'')"
+                        +
+                ".replace(/\\\\s+/g,' ')"
+                        +
+                ".trim();"
+                        +
 
-                "var usd=" +
-                "text.match(/([0-9][0-9,]*)\\\\s*USD/i);" +
+                "var mileage="
+                        +
+                "text.match(/([0-9][0-9,]*)\\\\s*km/i);"
+                        +
 
-                "var year1=" +
-                "text.match(/([0-9]{2}\\\\/[0-9]{2}식" +
-                "(?:\\\\([0-9]{2}년형\\\\))?)/);" +
+                "var krw="
+                        +
+                "text.match(/([0-9][0-9,]*)\\\\s*만원/);"
+                        +
 
-                "var year2=" +
-                "text.match(/((?:0[1-9]|1[0-2])\\\\/20[0-9]{2})/);" +
+                "var usd="
+                        +
+                "text.match(/([0-9][0-9,]*)\\\\s*USD/i);"
+                        +
 
-                "var fuel=" +
-                "text.match(/" +
-                "(가솔린 하이브리드|" +
-                "디젤 하이브리드|" +
-                "가솔린\\+전기|" +
-                "디젤|" +
-                "가솔린|" +
-                "전기|" +
-                "수소|" +
-                "Diesel Hybrid|" +
-                "Gasoline Hybrid|" +
-                "Diesel|" +
-                "Gasoline|" +
-                "Electric|" +
-                "EV|" +
-                "Hydrogen|" +
-                "LPG)" +
-                "/i);" +
+                "var year1="
+                        +
+                "text.match(/([0-9]{2}\\\\/[0-9]{2}식"
+                        +
+                "(?:\\\\([0-9]{2}년형\\\\))?)/);"
+                        +
 
-                "var href=car.href||'';" +
+                "var year2="
+                        +
+                "text.match(/((?:0[1-9]|1[0-2])\\\\/20[0-9]{2})/);"
+                        +
 
-                "var id=" +
-                "href.match(/\\/cars\\/detail\\/([0-9]+)/);" +
+                "var fuel="
+                        +
+                "text.match(/"
+                        +
+                "(가솔린\\\\+전기|"
+                        +
+                "가솔린 하이브리드|"
+                        +
+                "디젤 하이브리드|"
+                        +
+                "디젤|"
+                        +
+                "가솔린|"
+                        +
+                "전기|"
+                        +
+                "수소|"
+                        +
+                "Diesel Hybrid|"
+                        +
+                "Gasoline Hybrid|"
+                        +
+                "Diesel|"
+                        +
+                "Gasoline|"
+                        +
+                "Electric|"
+                        +
+                "EV|"
+                        +
+                "Hydrogen|"
+                        +
+                "LPG)"
+                        +
+                "/i);"
+                        +
 
-                "AndroidCarReader.receiveCar(" +
+                "var href=car.href||'';"
+                        +
 
-                "JSON.stringify({" +
+                "var id="
+                        +
+                "href.match(/\\/cars\\/detail\\/([0-9]+)/);"
+                        +
 
-                "text:text," +
+                "AndroidCarReader.receiveCar("
+                        +
 
-                "url:href," +
+                "JSON.stringify({"
+                        +
 
-                "carId:(id?id[1]:'')," +
+                "text:text,"
+                        +
 
-                "mileage:(mileage?mileage[1]:'')," +
+                "url:href,"
+                        +
 
-                "year:(year1?year1[1]:" +
-                "(year2?year2[1]:''))," +
+                "carId:(id?id[1]:''),"
+                        +
 
-                "fuel:(fuel?fuel[1]:'')," +
+                "mileage:(mileage?mileage[1]:''),"
+                        +
 
-                "priceKrw:(krw?krw[1]:'')," +
+                "year:(year1?year1[1]:"
+                        +
+                "(year2?year2[1]:'')),"
+                        +
 
-                "priceUsd:(usd?usd[1]:'')" +
+                "fuel:(fuel?fuel[1]:''),"
+                        +
 
-                "})" +
+                "priceKrw:(krw?krw[1]:''),"
+                        +
 
-                ");" +
+                "priceUsd:(usd?usd[1]:'')"
+                        +
+
+                "})"
+                        +
+
+                ");"
+                        +
 
                 "})();";
+
 
         webView.evaluateJavascript(
                 script,
                 null
         );
     }
+
 
     private class CarReader {
 
@@ -971,23 +1282,33 @@ public class MainActivity extends Activity {
                         try {
 
                             JSONObject obj =
-                                    new JSONObject(json);
+                                    new JSONObject(
+                                            json
+                                    );
+
 
                             if (
-                                    obj.has("error")
+                                    obj.has(
+                                            "error"
+                                    )
                             ) {
 
                                 if (
-                                        readAttempts <
+                                        readAttempts
+                                                <
                                         MAX_READ_ATTEMPTS
                                 ) {
 
                                     status.setText(
-                                            "Обявите още се зареждат... " +
-                                            readAttempts +
-                                            "/" +
+                                            "Обявите още се зареждат... "
+                                                    +
+                                            readAttempts
+                                                    +
+                                            "/"
+                                                    +
                                             MAX_READ_ATTEMPTS
                                     );
+
 
                                     handler.postDelayed(
                                             () -> readFirstCar(),
@@ -997,66 +1318,81 @@ public class MainActivity extends Activity {
                                 } else {
 
                                     status.setText(
-                                            "Не намерих обява след " +
-                                            MAX_READ_ATTEMPTS +
+                                            "Не намерих обява след "
+                                                    +
+                                            MAX_READ_ATTEMPTS
+                                                    +
                                             " опита."
                                     );
                                 }
 
+
                                 return;
                             }
+
 
                             String carId =
                                     obj.optString(
                                             "carId"
                                     );
 
+
                             String year =
                                     obj.optString(
                                             "year"
                                     );
+
 
                             String mileage =
                                     obj.optString(
                                             "mileage"
                                     );
 
+
                             String fuel =
                                     obj.optString(
                                             "fuel"
                                     );
+
 
                             String priceKrw =
                                     obj.optString(
                                             "priceKrw"
                                     );
 
+
                             String priceUsd =
                                     obj.optString(
                                             "priceUsd"
                                     );
+
 
                             String url =
                                     obj.optString(
                                             "url"
                                     );
 
+
                             String raw =
                                     obj.optString(
                                             "text"
                                     );
 
+
                             lastCarUrl =
                                     url;
 
+
                             String price;
+
 
                             if (
                                     !priceKrw.isEmpty()
                             ) {
 
                                 price =
-                                        priceKrw +
+                                        priceKrw
+                                                +
                                         " 만원";
 
                             } else if (
@@ -1064,7 +1400,8 @@ public class MainActivity extends Activity {
                             ) {
 
                                 price =
-                                        priceUsd +
+                                        priceUsd
+                                                +
                                         " USD";
 
                             } else {
@@ -1073,46 +1410,70 @@ public class MainActivity extends Activity {
                                         "не е разпозната";
                             }
 
+
                             lastResult =
-                                    "ПЪРВА ОБЯВА\n\n" +
+                                    "ПЪРВА ОБЯВА\n\n"
+                                            +
 
-                                    "ID: " +
-                                    carId +
-                                    "\n" +
+                                    "ID: "
+                                            +
+                                    carId
+                                            +
+                                    "\n"
+                                            +
 
-                                    "Година: " +
-                                    year +
-                                    "\n" +
+                                    "Година: "
+                                            +
+                                    year
+                                            +
+                                    "\n"
+                                            +
 
-                                    "Пробег: " +
-                                    mileage +
-                                    " km\n" +
+                                    "Пробег: "
+                                            +
+                                    mileage
+                                            +
+                                    " km\n"
+                                            +
 
-                                    "Гориво: " +
-                                    fuel +
-                                    "\n" +
+                                    "Гориво: "
+                                            +
+                                    fuel
+                                            +
+                                    "\n"
+                                            +
 
-                                    "Цена: " +
-                                    price +
-                                    "\n\n" +
+                                    "Цена: "
+                                            +
+                                    price
+                                            +
+                                    "\n\n"
+                                            +
 
-                                    "LINK:\n" +
-                                    url +
-                                    "\n\n" +
+                                    "LINK:\n"
+                                            +
+                                    url
+                                            +
+                                    "\n\n"
+                                            +
 
-                                    "RAW:\n" +
+                                    "RAW:\n"
+                                            +
                                     raw;
+
 
                             status.setText(
                                     lastResult
                             );
+
 
                         } catch (
                                 Exception e
                         ) {
 
                             status.setText(
-                                    "Грешка при четене: " +
+                                    "Грешка при четене: "
+                                            +
                                     e.getMessage()
                             );
                         }
@@ -1121,10 +1482,12 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private void openFirstCar() {
 
         if (
-                lastCarUrl == null ||
+                lastCarUrl == null
+                        ||
                 lastCarUrl.isEmpty()
         ) {
 
@@ -1135,18 +1498,22 @@ public class MainActivity extends Activity {
             return;
         }
 
+
         webView.loadUrl(
                 lastCarUrl
         );
     }
+
 
     private void copyResult() {
 
         String text =
                 lastResult;
 
+
         if (
-                text == null ||
+                text == null
+                        ||
                 text.isEmpty()
         ) {
 
@@ -1156,11 +1523,13 @@ public class MainActivity extends Activity {
                             .toString();
         }
 
+
         ClipboardManager clipboard =
                 (ClipboardManager)
                         getSystemService(
                                 Context.CLIPBOARD_SERVICE
                         );
+
 
         ClipData clip =
                 ClipData.newPlainText(
@@ -1168,21 +1537,26 @@ public class MainActivity extends Activity {
                         text
                 );
 
+
         clipboard.setPrimaryClip(
                 clip
         );
 
+
         status.setText(
-                text +
+                text
+                        +
                 "\n\nКОПИРАНО ✅"
         );
     }
+
 
     @Override
     public void onBackPressed() {
 
         if (
-                webView != null &&
+                webView != null
+                        &&
                 webView.canGoBack()
         ) {
 
