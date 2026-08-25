@@ -1,0 +1,59 @@
+name: Encar Full Recursive Scan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore previous scan checkpoint
+        uses: actions/cache@v4
+        with:
+          path: scan_output
+          key: encar-full-scan-${{ github.run_id }}
+          restore-keys: |
+            encar-full-scan-
+
+      - name: Run full recursive Encar scan
+        run: |
+          python tools/encar_full_scan.py \
+            --out scan_output \
+            --resume \
+            --delay 0.55 \
+            --max-requests 60000 \
+            --max-runtime-minutes 330 \
+            --checkpoint-every 10
+
+      - name: Show manifest
+        if: always()
+        run: |
+          if [ -f scan_output/manifest.json ]; then
+            cat scan_output/manifest.json
+          fi
+
+      - name: Upload scan result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ENCAR_FULL_CATALOG
+          path: |
+            scan_output/ENCAR_FULL_CATALOG.zip
+            scan_output/manifest.json
+            scan_output/checkpoint.json
+            scan_output/errors.jsonl
+          if-no-files-found: warn
+          retention-days: 30
