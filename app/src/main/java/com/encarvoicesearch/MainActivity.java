@@ -11,7 +11,6 @@ import android.speech.RecognizerIntent;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
-import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -25,6 +24,13 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -48,16 +54,19 @@ public class MainActivity extends Activity {
     private EditText input;
     private TextView status;
     private LinearLayout results;
-    private WebView apiWebView;
+    private WebView cookieWebView;
 
-    private boolean apiReady = false;
-    private String pendingQuery = null;
+    private String userAgent = "Mozilla/5.0";
 
-    private final Map<String, Brand> brandAliases =
+    private Spec pendingRetry;
+    private boolean cookieRefreshPending = false;
+
+    private final Map<String, Brand> brands =
             new LinkedHashMap<>();
 
-    private final Map<String, Map<String, String>> modelAliases =
+    private final Map<String, Map<String, String>> models =
             new LinkedHashMap<>();
+
 
     private static class Brand {
 
@@ -76,6 +85,7 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private static class Spec {
 
         Brand brand;
@@ -89,25 +99,27 @@ public class MainActivity extends Activity {
         Integer maxMileage;
     }
 
+
     private static class Car {
 
         String id = "";
-        String manufacturer = "";
+
+        String maker = "";
         String model = "";
         String badge = "";
+
         String year = "";
         String mileage = "";
-        String price = "";
         String fuel = "";
+
+        String price = "";
 
         long priceNumber =
                 Long.MAX_VALUE;
     }
 
-    @SuppressLint({
-            "SetJavaScriptEnabled",
-            "JavascriptInterface"
-    })
+
+    @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(
             Bundle savedInstanceState
@@ -121,20 +133,26 @@ public class MainActivity extends Activity {
 
         buildUi();
 
-        WebSettings settings =
-                apiWebView.getSettings();
 
-        settings.setJavaScriptEnabled(
+        WebSettings ws =
+                cookieWebView.getSettings();
+
+        ws.setJavaScriptEnabled(
                 true
         );
 
-        settings.setDomStorageEnabled(
+        ws.setDomStorageEnabled(
                 true
         );
 
-        settings.setDatabaseEnabled(
+        ws.setDatabaseEnabled(
                 true
         );
+
+
+        userAgent =
+                ws.getUserAgentString();
+
 
         CookieManager cm =
                 CookieManager.getInstance();
@@ -144,16 +162,12 @@ public class MainActivity extends Activity {
         );
 
         cm.setAcceptThirdPartyCookies(
-                apiWebView,
+                cookieWebView,
                 true
         );
 
-        apiWebView.addJavascriptInterface(
-                new ApiBridge(),
-                "EncarApp"
-        );
 
-        apiWebView.setWebViewClient(
+        cookieWebView.setWebViewClient(
                 new WebViewClient() {
 
                     @Override
@@ -167,44 +181,51 @@ public class MainActivity extends Activity {
                                 url
                         );
 
+
+                        CookieManager
+                                .getInstance()
+                                .flush();
+
+
                         if (
-                                url != null
+                                cookieRefreshPending
                                         &&
-                                url.contains(
-                                        "encar.com"
-                                )
+                                pendingRetry != null
                         ) {
 
-                            apiReady =
-                                    true;
+                            cookieRefreshPending =
+                                    false;
+
+
+                            Spec retry =
+                                    pendingRetry;
+
+
+                            pendingRetry =
+                                    null;
+
+
+                            requestNative(
+                                    retry,
+                                    true
+                            );
+
+                        } else {
 
                             status.setText(
                                     "Готово за търсене"
                             );
-
-                            if (
-                                    pendingQuery != null
-                            ) {
-
-                                String q =
-                                        pendingQuery;
-
-                                pendingQuery =
-                                        null;
-
-                                fetchApi(
-                                        q
-                                );
-                            }
                         }
                     }
                 }
         );
 
-        apiWebView.loadUrl(
+
+        cookieWebView.loadUrl(
                 HOME
         );
     }
+
 
     private void buildUi() {
 
@@ -218,6 +239,7 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(
                 Color.WHITE
         );
+
 
         TextView title =
                 new TextView(this);
@@ -245,6 +267,7 @@ public class MainActivity extends Activity {
                 8
         );
 
+
         input =
                 new EditText(this);
 
@@ -264,19 +287,14 @@ public class MainActivity extends Activity {
                 4
         );
 
-        input.setPadding(
-                16,
-                10,
-                16,
-                10
-        );
 
-        LinearLayout buttons =
+        LinearLayout row =
                 new LinearLayout(this);
 
-        buttons.setOrientation(
+        row.setOrientation(
                 LinearLayout.HORIZONTAL
         );
+
 
         Button voice =
                 new Button(this);
@@ -289,6 +307,7 @@ public class MainActivity extends Activity {
                 v -> startVoice()
         );
 
+
         Button search =
                 new Button(this);
 
@@ -299,6 +318,7 @@ public class MainActivity extends Activity {
         search.setOnClickListener(
                 v -> runSearch()
         );
+
 
         Button clear =
                 new Button(this);
@@ -320,6 +340,7 @@ public class MainActivity extends Activity {
                 }
         );
 
+
         LinearLayout.LayoutParams bp =
                 new LinearLayout.LayoutParams(
                         0,
@@ -327,26 +348,28 @@ public class MainActivity extends Activity {
                         1f
                 );
 
-        buttons.addView(
+
+        row.addView(
                 voice,
                 bp
         );
 
-        buttons.addView(
+        row.addView(
                 search,
                 bp
         );
 
-        buttons.addView(
+        row.addView(
                 clear,
                 bp
         );
+
 
         status =
                 new TextView(this);
 
         status.setText(
-                "Зареждам Encar..."
+                "Зареждам Encar cookies..."
         );
 
         status.setTextSize(
@@ -368,6 +391,7 @@ public class MainActivity extends Activity {
                 true
         );
 
+
         results =
                 new LinearLayout(this);
 
@@ -382,6 +406,7 @@ public class MainActivity extends Activity {
                 20
         );
 
+
         ScrollView scroll =
                 new ScrollView(this);
 
@@ -389,12 +414,14 @@ public class MainActivity extends Activity {
                 results
         );
 
-        apiWebView =
+
+        cookieWebView =
                 new WebView(this);
 
-        apiWebView.setVisibility(
+        cookieWebView.setVisibility(
                 View.INVISIBLE
         );
+
 
         root.addView(
                 title
@@ -405,12 +432,13 @@ public class MainActivity extends Activity {
         );
 
         root.addView(
-                buttons
+                row
         );
 
         root.addView(
                 status
         );
+
 
         root.addView(
                 scroll,
@@ -421,18 +449,21 @@ public class MainActivity extends Activity {
                 )
         );
 
+
         root.addView(
-                apiWebView,
+                cookieWebView,
                 new LinearLayout.LayoutParams(
                         1,
                         1
                 )
         );
 
+
         setContentView(
                 root
         );
     }
+
 
     private void startVoice() {
 
@@ -441,20 +472,24 @@ public class MainActivity extends Activity {
                         RecognizerIntent.ACTION_RECOGNIZE_SPEECH
                 );
 
+
         intent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
         );
+
 
         intent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE,
                 "bg-BG"
         );
 
+
         intent.putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
-                "Например: Kia Sorento 2025 бензин до 100000 километра"
+                "Например: Kia Sorento 2025 бензин"
         );
+
 
         try {
 
@@ -475,6 +510,7 @@ public class MainActivity extends Activity {
         }
     }
 
+
     @Override
     @SuppressWarnings("deprecation")
     protected void onActivityResult(
@@ -489,6 +525,7 @@ public class MainActivity extends Activity {
                 data
         );
 
+
         if (
                 requestCode == VOICE_REQUEST
                         &&
@@ -502,6 +539,7 @@ public class MainActivity extends Activity {
                             RecognizerIntent.EXTRA_RESULTS
                     );
 
+
             if (
                     recognized != null
                             &&
@@ -512,6 +550,7 @@ public class MainActivity extends Activity {
                         recognized.get(0)
                 );
 
+
                 input.setSelection(
                         input
                                 .getText()
@@ -521,6 +560,7 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private void runSearch() {
 
         String raw =
@@ -528,6 +568,7 @@ public class MainActivity extends Activity {
                         .getText()
                         .toString()
                         .trim();
+
 
         if (
                 raw.isEmpty()
@@ -542,10 +583,12 @@ public class MainActivity extends Activity {
             return;
         }
 
+
         Spec spec =
                 parse(
                         raw
                 );
+
 
         if (
                 spec.brand == null
@@ -558,46 +601,463 @@ public class MainActivity extends Activity {
             return;
         }
 
-        String q =
-                buildQ(
-                        spec
-                );
 
         results.removeAllViews();
+
 
         status.setText(
                 buildStatus(spec)
                         +
-                "\nТърся директно в Encar API..."
+                "\nСвързвам се директно с Encar API..."
         );
 
-        if (
-                apiReady
+
+        requestNative(
+                spec,
+                false
+        );
+    }
+
+
+    private void requestNative(
+            Spec spec,
+            boolean alreadyRefreshedCookies
+    ) {
+
+        CookieManager
+                .getInstance()
+                .flush();
+
+
+        String cookieHeader =
+                collectCookies();
+
+
+        String ua =
+                userAgent;
+
+
+        new Thread(
+                () -> {
+
+                    HttpURLConnection connection =
+                            null;
+
+
+                    try {
+
+                        String q =
+                                buildQ(
+                                        spec
+                                );
+
+
+                        String apiUrl =
+                                buildApiUrl(
+                                        q,
+                                        "Price"
+                                );
+
+
+                        connection =
+                                (HttpURLConnection)
+                                        new URL(
+                                                apiUrl
+                                        )
+                                                .openConnection();
+
+
+                        connection.setRequestMethod(
+                                "GET"
+                        );
+
+
+                        connection.setConnectTimeout(
+                                15000
+                        );
+
+
+                        connection.setReadTimeout(
+                                25000
+                        );
+
+
+                        connection.setInstanceFollowRedirects(
+                                true
+                        );
+
+
+                        connection.setRequestProperty(
+                                "Accept",
+                                "application/json, text/plain, */*"
+                        );
+
+
+                        connection.setRequestProperty(
+                                "Accept-Language",
+                                "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
+                        );
+
+
+                        connection.setRequestProperty(
+                                "User-Agent",
+                                ua == null
+                                        ?
+                                "Mozilla/5.0"
+                                        :
+                                ua
+                        );
+
+
+                        connection.setRequestProperty(
+                                "Referer",
+                                HOME
+                        );
+
+
+                        connection.setRequestProperty(
+                                "Origin",
+                                "https://m.encar.com"
+                        );
+
+
+                        connection.setRequestProperty(
+                                "Connection",
+                                "close"
+                        );
+
+
+                        if (
+                                cookieHeader != null
+                                        &&
+                                !cookieHeader.isEmpty()
+                        ) {
+
+                            connection.setRequestProperty(
+                                    "Cookie",
+                                    cookieHeader
+                            );
+                        }
+
+
+                        int code =
+                                connection.getResponseCode();
+
+
+                        InputStream stream;
+
+
+                        if (
+                                code >= 200
+                                        &&
+                                code < 400
+                        ) {
+
+                            stream =
+                                    connection.getInputStream();
+
+                        } else {
+
+                            stream =
+                                    connection.getErrorStream();
+                        }
+
+
+                        String body =
+                                readAll(
+                                        stream
+                                );
+
+
+                        if (
+                                (
+                                        code == 401
+                                                ||
+                                        code == 403
+                                                ||
+                                        code == 407
+                                )
+                                        &&
+                                !alreadyRefreshedCookies
+                        ) {
+
+                            runOnUiThread(
+                                    () ->
+                                            refreshCookiesAndRetry(
+                                                    spec
+                                            )
+                            );
+
+                            return;
+                        }
+
+
+                        if (
+                                code < 200
+                                        ||
+                                code >= 300
+                        ) {
+
+                            String shortBody =
+                                    body == null
+                                            ?
+                                    ""
+                                            :
+                                    body.substring(
+                                            0,
+                                            Math.min(
+                                                    body.length(),
+                                                    500
+                                            )
+                                    );
+
+
+                            final String error =
+                                    "Encar API HTTP "
+                                            +
+                                    code
+                                            +
+                                    "\n"
+                                            +
+                                    shortBody;
+
+
+                            runOnUiThread(
+                                    () ->
+                                            showError(
+                                                    error
+                                            )
+                            );
+
+                            return;
+                        }
+
+
+                        List<Car> cars =
+                                parseCars(
+                                        body
+                                );
+
+
+                        Collections.sort(
+                                cars,
+                                Comparator.comparingLong(
+                                        car ->
+                                                car.priceNumber
+                                )
+                        );
+
+
+                        runOnUiThread(
+                                () ->
+                                        showCars(
+                                                cars,
+                                                spec
+                                        )
+                        );
+
+
+                    } catch (
+                            Exception e
+                    ) {
+
+                        String message =
+                                e.getClass()
+                                        .getSimpleName()
+                                        +
+                                ": "
+                                        +
+                                (
+                                        e.getMessage() == null
+                                                ?
+                                        ""
+                                                :
+                                        e.getMessage()
+                                );
+
+
+                        runOnUiThread(
+                                () ->
+                                        showError(
+                                                "Мрежова грешка: "
+                                                        +
+                                                message
+                                        )
+                        );
+
+
+                    } finally {
+
+                        if (
+                                connection != null
+                        ) {
+
+                            connection.disconnect();
+                        }
+                    }
+                }
+        ).start();
+    }
+
+
+    private void refreshCookiesAndRetry(
+            Spec spec
+    ) {
+
+        pendingRetry =
+                spec;
+
+
+        cookieRefreshPending =
+                true;
+
+
+        status.setText(
+                buildStatus(spec)
+                        +
+                "\nОбновявам Encar cookies и опитвам отново..."
+        );
+
+
+        cookieWebView.stopLoading();
+
+
+        cookieWebView.loadUrl(
+                HOME
+                        +
+                "?refresh="
+                        +
+                System.currentTimeMillis()
+        );
+    }
+
+
+    private String collectCookies() {
+
+        CookieManager manager =
+                CookieManager.getInstance();
+
+
+        LinkedHashMap<String, String> merged =
+                new LinkedHashMap<>();
+
+
+        mergeCookieString(
+                merged,
+                manager.getCookie(
+                        "https://m.encar.com"
+                )
+        );
+
+
+        mergeCookieString(
+                merged,
+                manager.getCookie(
+                        "https://api.encar.com"
+                )
+        );
+
+
+        StringBuilder output =
+                new StringBuilder();
+
+
+        for (
+                Map.Entry<String, String> entry
+                        :
+                merged.entrySet()
         ) {
 
-            fetchApi(
-                    q
+            if (
+                    output.length() > 0
+            ) {
+
+                output.append(
+                        "; "
+                );
+            }
+
+
+            output.append(
+                    entry.getKey()
             );
 
-        } else {
 
-            pendingQuery =
-                    q;
-
-            status.append(
-                    "\nИзчаквам Encar да се инициализира..."
+            output.append(
+                    "="
             );
 
-            apiWebView.loadUrl(
-                    HOME
+
+            output.append(
+                    entry.getValue()
             );
+        }
+
+
+        return output.toString();
+    }
+
+
+    private void mergeCookieString(
+            Map<String, String> output,
+            String cookies
+    ) {
+
+        if (
+                cookies == null
+                        ||
+                cookies.trim().isEmpty()
+        ) {
+
+            return;
+        }
+
+
+        String[] parts =
+                cookies.split(
+                        ";"
+                );
+
+
+        for (
+                String part : parts
+        ) {
+
+            String p =
+                    part.trim();
+
+
+            int index =
+                    p.indexOf(
+                            '='
+                    );
+
+
+            if (
+                    index > 0
+            ) {
+
+                output.put(
+                        p.substring(
+                                0,
+                                index
+                        )
+                                .trim(),
+
+                        p.substring(
+                                index + 1
+                        )
+                                .trim()
+                );
+            }
         }
     }
 
+
     private String buildApiUrl(
             String q,
-            String sort
-    ) {
+            String sortKey
+    ) throws Exception {
 
         return API
                 +
@@ -605,141 +1065,70 @@ public class MainActivity extends Activity {
                 +
                 "&q="
                 +
-                Uri.encode(q)
+                URLEncoder.encode(
+                        q,
+                        StandardCharsets.UTF_8.name()
+                )
                 +
                 "&sr="
                 +
-                Uri.encode(
+                URLEncoder.encode(
                         "|"
                                 +
-                        sort
+                        sortKey
                                 +
-                        "|0|100"
+                        "|0|200",
+                        StandardCharsets.UTF_8.name()
                 )
                 +
                 "&inav="
                 +
-                Uri.encode(
-                        "|Metadata|Sort"
+                URLEncoder.encode(
+                        "|Metadata|Sort",
+                        StandardCharsets.UTF_8.name()
                 );
     }
 
-    private void fetchApi(
-            String q
-    ) {
 
-        String priceUrl =
-                JSONObject.quote(
-                        buildApiUrl(
-                                q,
-                                "Price"
-                        )
-                );
-
-        String fallbackUrl =
-                JSONObject.quote(
-                        buildApiUrl(
-                                q,
-                                "ModifiedDate"
-                        )
-                );
-
-        String javascript =
-
-                "(async function(){"
-                        +
-
-                "let urls=["
-                        +
-                priceUrl
-                        +
-                ","
-                        +
-                fallbackUrl
-                        +
-                "];"
-                        +
-
-                "let last='';"
-                        +
-
-                "for(let i=0;i<urls.length;i++){"
-                        +
-
-                "try{"
-                        +
-
-                "let r=await fetch("
-                        +
-                "urls[i],"
-                        +
-                "{"
-                        +
-                "method:'GET',"
-                        +
-                "credentials:'include',"
-                        +
-                "headers:{'Accept':'application/json'}"
-                        +
-                "}"
-                        +
-                ");"
-                        +
-
-                "let t=await r.text();"
-                        +
-
-                "if(r.ok&&t){"
-                        +
-                "EncarApp.onApiResponse(t);"
-                        +
-                "return;"
-                        +
-                "}"
-                        +
-
-                "last='HTTP '+r.status+' '+t.substring(0,300);"
-                        +
-
-                "}catch(e){"
-                        +
-                "last=String(e);"
-                        +
-                "}"
-                        +
-
-                "}"
-                        +
-
-                "EncarApp.onApiError("
-                        +
-                "last||'Unknown API error'"
-                        +
-                ");"
-                        +
-
-                "})();";
-
-        apiWebView.evaluateJavascript(
-                javascript,
-                null
-        );
-    }
-
+    /*
+     * Тук използваме структурата,
+     * която установихме със скенера:
+     *
+     * CarType
+     * Manufacturer
+     * ModelGroup
+     */
     private String buildQ(
             Spec spec
     ) {
 
-        List<String> filters =
+        List<String> parts =
                 new ArrayList<>();
 
-        filters.add(
+
+        parts.add(
                 "Hidden.N."
         );
 
-        filters.add(
+
+        parts.add(
                 "SellType.일반."
         );
+
+
+        if (
+                spec.maxMileage != null
+        ) {
+
+            parts.add(
+                    "Mileage.range(.."
+                            +
+                    spec.maxMileage
+                            +
+                    ")."
+            );
+        }
+
 
         if (
                 spec.yearFrom != null
@@ -752,6 +1141,7 @@ public class MainActivity extends Activity {
                             *
                     100;
 
+
             int to =
                     spec.yearTo
                             *
@@ -759,7 +1149,8 @@ public class MainActivity extends Activity {
                             +
                     99;
 
-            filters.add(
+
+            parts.add(
                     "Year.range("
                             +
                     from
@@ -772,24 +1163,12 @@ public class MainActivity extends Activity {
             );
         }
 
-        if (
-                spec.maxMileage != null
-        ) {
-
-            filters.add(
-                    "Mileage.range(.."
-                            +
-                    spec.maxMileage
-                            +
-                    ")."
-            );
-        }
 
         if (
                 spec.fuel != null
         ) {
 
-            filters.add(
+            parts.add(
                     "FuelType."
                             +
                     spec.fuel
@@ -798,7 +1177,9 @@ public class MainActivity extends Activity {
             );
         }
 
+
         String branch;
+
 
         if (
                 spec.modelGroup != null
@@ -835,18 +1216,21 @@ public class MainActivity extends Activity {
                     ".))";
         }
 
-        filters.add(
+
+        parts.add(
                 branch
         );
 
-        StringBuilder q =
+
+        StringBuilder query =
                 new StringBuilder(
                         "(And."
                 );
 
+
         for (
                 int i = 0;
-                i < filters.size();
+                i < parts.size();
                 i++
         ) {
 
@@ -854,39 +1238,46 @@ public class MainActivity extends Activity {
                     i > 0
             ) {
 
-                q.append(
+                query.append(
                         "_."
                 );
             }
 
-            q.append(
-                    filters.get(i)
+
+            query.append(
+                    parts.get(i)
             );
         }
 
-        q.append(
+
+        query.append(
                 ")"
         );
 
-        return q.toString();
+
+        return query.toString();
     }
+
 
     private Spec parse(
             String raw
     ) {
-
-        Spec spec =
-                new Spec();
 
         String text =
                 normalize(
                         raw
                 );
 
+
+        Spec spec =
+                new Spec();
+
+
         spec.brand =
                 findBrand(
                         text
                 );
+
 
         if (
                 spec.brand != null
@@ -899,20 +1290,24 @@ public class MainActivity extends Activity {
                     );
         }
 
+
         spec.fuel =
                 findFuel(
                         text
                 );
+
 
         spec.maxMileage =
                 findMileage(
                         text
                 );
 
+
         List<Integer> years =
                 findYears(
                         raw
                 );
+
 
         if (
                 years.size() == 1
@@ -920,6 +1315,7 @@ public class MainActivity extends Activity {
 
             spec.yearFrom =
                     years.get(0);
+
 
             spec.yearTo =
                     years.get(0);
@@ -933,14 +1329,17 @@ public class MainActivity extends Activity {
                             years
                     );
 
+
             spec.yearTo =
                     Collections.max(
                             years
                     );
         }
 
+
         return spec;
     }
+
 
     private Brand findBrand(
             String text
@@ -949,13 +1348,15 @@ public class MainActivity extends Activity {
         Brand best =
                 null;
 
-        int bestLength =
+
+        int longest =
                 -1;
+
 
         for (
                 Map.Entry<String, Brand> entry
                         :
-                brandAliases.entrySet()
+                brands.entrySet()
         ) {
 
             if (
@@ -968,21 +1369,24 @@ public class MainActivity extends Activity {
                             .getKey()
                             .length()
                             >
-                    bestLength
+                    longest
             ) {
 
                 best =
                         entry.getValue();
 
-                bestLength =
+
+                longest =
                         entry
                                 .getKey()
                                 .length();
             }
         }
 
+
         return best;
     }
+
 
     private String findModel(
             String text,
@@ -990,9 +1394,10 @@ public class MainActivity extends Activity {
     ) {
 
         Map<String, String> map =
-                modelAliases.get(
+                models.get(
                         brand.key
                 );
+
 
         if (
                 map != null
@@ -1001,8 +1406,10 @@ public class MainActivity extends Activity {
             String best =
                     null;
 
-            int bestLength =
+
+            int longest =
                     -1;
+
 
             for (
                     Map.Entry<String, String> entry
@@ -1020,18 +1427,20 @@ public class MainActivity extends Activity {
                                 .getKey()
                                 .length()
                                 >
-                        bestLength
+                        longest
                 ) {
 
                     best =
                             entry.getValue();
 
-                    bestLength =
+
+                    longest =
                             entry
                                     .getKey()
                                     .length();
                 }
             }
+
 
             if (
                     best != null
@@ -1041,6 +1450,10 @@ public class MainActivity extends Activity {
             }
         }
 
+
+        /*
+         * MERCEDES
+         */
         if (
                 "mercedes".equals(
                         brand.key
@@ -1055,6 +1468,7 @@ public class MainActivity extends Activity {
                                     text
                             );
 
+
             if (
                     suv.find()
             ) {
@@ -1068,6 +1482,7 @@ public class MainActivity extends Activity {
                         "-클래스";
             }
 
+
             Matcher normalClass =
                     Pattern.compile(
                             "\\b([acesg])\\s*[- ]?\\d{3}[a-z]*\\b"
@@ -1075,6 +1490,7 @@ public class MainActivity extends Activity {
                             .matcher(
                                     text
                             );
+
 
             if (
                     normalClass.find()
@@ -1090,6 +1506,10 @@ public class MainActivity extends Activity {
             }
         }
 
+
+        /*
+         * BMW
+         */
         if (
                 "bmw".equals(
                         brand.key
@@ -1104,6 +1524,7 @@ public class MainActivity extends Activity {
                                     text
                             );
 
+
             if (
                     series.find()
             ) {
@@ -1113,164 +1534,12 @@ public class MainActivity extends Activity {
                         +
                         "시리즈";
             }
-
-            Matcher x =
-                    Pattern.compile(
-                            "\\b(x[1-7]|z4|i[3-8]|ix)\\b"
-                    )
-                            .matcher(
-                                    text
-                            );
-
-            if (
-                    x.find()
-            ) {
-
-                return x
-                        .group(1)
-                        .toUpperCase(
-                                Locale.ROOT
-                        );
-            }
         }
 
-        return genericImportedModel(
-                text,
-                brand
-        );
-    }
-
-    private String genericImportedModel(
-            String text,
-            Brand brand
-    ) {
-
-        if (
-                "Y".equals(
-                        brand.carType
-                )
-        ) {
-
-            return null;
-        }
-
-        String cleaned =
-                " "
-                        +
-                text
-                        +
-                " ";
-
-        for (
-                Map.Entry<String, Brand> entry
-                        :
-                brandAliases.entrySet()
-        ) {
-
-            if (
-                    entry
-                            .getValue()
-                            .key
-                            .equals(
-                                    brand.key
-                            )
-            ) {
-
-                cleaned =
-                        cleaned.replace(
-                                " "
-                                        +
-                                entry.getKey()
-                                        +
-                                " ",
-                                " "
-                        );
-            }
-        }
-
-        cleaned =
-                cleaned.replaceAll(
-                        "\\b(19\\d{2}|20\\d{2})\\b",
-                        " "
-                );
-
-        cleaned =
-                cleaned.replaceAll(
-                        "\\b\\d[\\d .]{2,}\\s*(km|км|километра|километри)\\b",
-                        " "
-                );
-
-        String[] noise = {
-
-                "diesel",
-                "дизел",
-                "дизелов",
-
-                "petrol",
-                "gasoline",
-                "бензин",
-                "бензинов",
-
-                "hybrid",
-                "хибрид",
-                "хибриден",
-
-                "electric",
-                "ev",
-                "електрически",
-                "електрическа",
-
-                "до",
-                "под",
-
-                "търси",
-                "кола",
-                "автомобил"
-        };
-
-        for (
-                String word : noise
-        ) {
-
-            cleaned =
-                    cleaned.replace(
-                            " "
-                                    +
-                            normalize(word)
-                                    +
-                            " ",
-                            " "
-                    );
-        }
-
-        cleaned =
-                cleaned.replaceAll(
-                        "\\s+",
-                        " "
-                )
-                        .trim();
-
-        Matcher matcher =
-                Pattern.compile(
-                        "\\b[a-zA-Z][a-zA-Z0-9.-]{0,15}\\b"
-                )
-                        .matcher(
-                                cleaned
-                        );
-
-        if (
-                matcher.find()
-        ) {
-
-            return matcher
-                    .group()
-                    .toUpperCase(
-                            Locale.ROOT
-                    );
-        }
 
         return null;
     }
+
 
     private String findFuel(
             String text
@@ -1288,6 +1557,21 @@ public class MainActivity extends Activity {
             return "디젤";
         }
 
+
+        if (
+                containsAny(
+                        text,
+                        "petrol",
+                        "gasoline",
+                        "бензин",
+                        "бензинов"
+                )
+        ) {
+
+            return "가솔린";
+        }
+
+
         if (
                 containsAny(
                         text,
@@ -1304,6 +1588,7 @@ public class MainActivity extends Activity {
             return "가솔린+전기";
         }
 
+
         if (
                 containsAny(
                         text,
@@ -1318,18 +1603,6 @@ public class MainActivity extends Activity {
             return "전기";
         }
 
-        if (
-                containsAny(
-                        text,
-                        "petrol",
-                        "gasoline",
-                        "бензин",
-                        "бензинов"
-                )
-        ) {
-
-            return "가솔린";
-        }
 
         if (
                 containsAny(
@@ -1342,8 +1615,10 @@ public class MainActivity extends Activity {
             return "LPG";
         }
 
+
         return null;
     }
+
 
     private List<Integer> findYears(
             String raw
@@ -1352,6 +1627,7 @@ public class MainActivity extends Activity {
         List<Integer> result =
                 new ArrayList<>();
 
+
         Matcher matcher =
                 Pattern.compile(
                         "\\b(19\\d{2}|20\\d{2})\\b"
@@ -1359,6 +1635,7 @@ public class MainActivity extends Activity {
                         .matcher(
                                 raw
                         );
+
 
         while (
                 matcher.find()
@@ -1370,6 +1647,7 @@ public class MainActivity extends Activity {
                         Integer.parseInt(
                                 matcher.group(1)
                         );
+
 
                 if (
                         year >= 1980
@@ -1388,8 +1666,10 @@ public class MainActivity extends Activity {
             }
         }
 
+
         return result;
     }
+
 
     private Integer findMileage(
             String text
@@ -1402,6 +1682,7 @@ public class MainActivity extends Activity {
                         .matcher(
                                 text
                         );
+
 
         if (
                 thousands.find()
@@ -1421,7 +1702,8 @@ public class MainActivity extends Activity {
             }
         }
 
-        Matcher km =
+
+        Matcher kilometers =
                 Pattern.compile(
                         "([0-9][0-9 .]{1,10})\\s*(km|км|километра|километри)"
                 )
@@ -1429,23 +1711,23 @@ public class MainActivity extends Activity {
                                 text
                         );
 
+
         if (
-                km.find()
+                kilometers.find()
         ) {
 
             try {
 
-                String digits =
-                        km.group(1)
-                                .replaceAll(
-                                        "[^0-9]",
-                                        ""
-                                );
-
                 int value =
                         Integer.parseInt(
-                                digits
+                                kilometers
+                                        .group(1)
+                                        .replaceAll(
+                                                "[^0-9]",
+                                                ""
+                                        )
                         );
+
 
                 if (
                         value > 0
@@ -1462,56 +1744,65 @@ public class MainActivity extends Activity {
             }
         }
 
+
         return null;
     }
+
 
     private String buildStatus(
             Spec spec
     ) {
 
-        StringBuilder b =
+        StringBuilder output =
                 new StringBuilder(
-                        "НАЙ-ЕВТИНИ ПЪРВО"
+                        "НАЙ-ЕВТИНИ ПЪРВО | "
                 );
 
-        b.append(
-                " | "
-        );
 
-        b.append(
+        output.append(
                 spec.brand.encar
         );
 
-        b.append(
+
+        output.append(
                 " | CarType."
         );
 
-        b.append(
+
+        output.append(
                 spec.brand.carType
         );
+
 
         if (
                 spec.modelGroup != null
         ) {
 
-            b.append(
+            output.append(
                     " | "
             );
 
-            b.append(
+
+            output.append(
                     spec.modelGroup
             );
 
         } else {
 
-            b.append(
+            output.append(
                     " | всички модели"
             );
         }
 
+
         if (
                 spec.yearFrom != null
         ) {
+
+            output.append(
+                    " | "
+            );
+
 
             if (
                     spec.yearFrom.equals(
@@ -1519,258 +1810,160 @@ public class MainActivity extends Activity {
                     )
             ) {
 
-                b.append(
-                        " | "
-                );
-
-                b.append(
+                output.append(
                         spec.yearFrom
                 );
 
             } else {
 
-                b.append(
-                        " | "
-                );
-
-                b.append(
+                output.append(
                         spec.yearFrom
                 );
 
-                b.append(
+
+                output.append(
                         "-"
                 );
 
-                b.append(
+
+                output.append(
                         spec.yearTo
                 );
             }
         }
 
+
         if (
                 spec.fuel != null
         ) {
 
-            b.append(
+            output.append(
                     " | "
             );
 
-            b.append(
+
+            output.append(
                     spec.fuel
             );
         }
+
 
         if (
                 spec.maxMileage != null
         ) {
 
-            b.append(
+            output.append(
                     " | до "
             );
 
-            b.append(
+
+            output.append(
                     spec.maxMileage
             );
 
-            b.append(
+
+            output.append(
                     " km"
             );
         }
 
-        return b.toString();
+
+        return output.toString();
     }
 
-    public class ApiBridge {
 
-        @JavascriptInterface
-        public void onApiResponse(
-                String json
+    private String readAll(
+            InputStream stream
+    ) throws Exception {
+
+        if (
+                stream == null
         ) {
 
-            runOnUiThread(
-                    () ->
-                            handleApiResponse(
-                                    json
-                            )
+            return "";
+        }
+
+
+        BufferedReader reader =
+                new BufferedReader(
+                        new InputStreamReader(
+                                stream,
+                                StandardCharsets.UTF_8
+                        )
+                );
+
+
+        StringBuilder output =
+                new StringBuilder();
+
+
+        String line;
+
+
+        while (
+                (
+                        line =
+                                reader.readLine()
+                )
+                        != null
+        ) {
+
+            output.append(
+                    line
             );
         }
 
-        @JavascriptInterface
-        public void onApiError(
-                String error
-        ) {
 
-            runOnUiThread(
-                    () -> {
+        reader.close();
 
-                        status.setText(
-                                "Encar API грешка: "
-                                        +
-                                error
-                        );
 
-                        results.removeAllViews();
-
-                        TextView message =
-                                new TextView(
-                                        MainActivity.this
-                                );
-
-                        message.setText(
-                                "API заявката не беше приета.\n"
-                                        +
-                                "Ако виждаш HTTP 407, затвори и отвори приложението, "
-                                        +
-                                "за да се обновят Encar cookies."
-                        );
-
-                        message.setTextSize(
-                                16f
-                        );
-
-                        message.setPadding(
-                                14,
-                                14,
-                                14,
-                                14
-                        );
-
-                        results.addView(
-                                message
-                        );
-                    }
-            );
-        }
+        return output.toString();
     }
 
-    private void handleApiResponse(
-            String json
-    ) {
 
-        try {
+    private List<Car> parseCars(
+            String body
+    ) throws Exception {
 
-            Object root;
+        Object root;
 
-            String text =
-                    json == null
-                            ?
-                    ""
-                            :
-                    json.trim();
 
-            if (
-                    text.startsWith(
-                            "["
-                    )
-            ) {
+        if (
+                body.trim()
+                        .startsWith(
+                                "["
+                        )
+        ) {
 
-                root =
-                        new JSONArray(
-                                text
-                        );
-
-            } else {
-
-                root =
-                        new JSONObject(
-                                text
-                        );
-            }
-
-            Map<String, Car> unique =
-                    new LinkedHashMap<>();
-
-            collectCars(
-                    root,
-                    unique
-            );
-
-            List<Car> cars =
-                    new ArrayList<>(
-                            unique.values()
+            root =
+                    new JSONArray(
+                            body
                     );
 
-            cars.sort(
-                    Comparator.comparingLong(
-                            car ->
-                                    car.priceNumber
-                    )
-            );
+        } else {
 
-            results.removeAllViews();
-
-            if (
-                    cars.isEmpty()
-            ) {
-
-                status.setText(
-                        status.getText()
-                                +
-                        "\nAPI отговорът е получен, но няма намерени обяви."
-                );
-
-                TextView message =
-                        new TextView(this);
-
-                message.setText(
-                        "Няма автомобили по тези критерии."
-                );
-
-                message.setTextSize(
-                        16f
-                );
-
-                message.setPadding(
-                        14,
-                        14,
-                        14,
-                        14
-                );
-
-                results.addView(
-                        message
-                );
-
-                return;
-            }
-
-            status.setText(
-                    "Намерени "
-                            +
-                    cars.size()
-                            +
-                    " обяви | най-ниската цена първа"
-            );
-
-            int limit =
-                    Math.min(
-                            cars.size(),
-                            100
+            root =
+                    new JSONObject(
+                            body
                     );
-
-            for (
-                    int i = 0;
-                    i < limit;
-                    i++
-            ) {
-
-                addCarCard(
-                        cars.get(i),
-                        i + 1
-                );
-            }
-
-        } catch (
-                Exception e
-        ) {
-
-            status.setText(
-                    "Не успях да прочета Encar JSON: "
-                            +
-                    e.getMessage()
-            );
         }
+
+
+        LinkedHashMap<String, Car> unique =
+                new LinkedHashMap<>();
+
+
+        collectCars(
+                root,
+                unique
+        );
+
+
+        return new ArrayList<>(
+                unique.values()
+        );
     }
+
 
     private void collectCars(
             Object node,
@@ -1786,6 +1979,7 @@ public class MainActivity extends Activity {
                 JSONObject object =
                         (JSONObject) node;
 
+
                 String id =
                         pick(
                                 object,
@@ -1795,12 +1989,14 @@ public class MainActivity extends Activity {
                                 "carId"
                         );
 
+
                 String price =
                         pick(
                                 object,
                                 "Price",
                                 "price"
                         );
+
 
                 if (
                         !id.isEmpty()
@@ -1811,18 +2007,22 @@ public class MainActivity extends Activity {
                     Car car =
                             new Car();
 
+
                     car.id =
                             id;
+
 
                     car.price =
                             price;
 
+
                     car.priceNumber =
-                            parseNumber(
+                            number(
                                     price
                             );
 
-                    car.manufacturer =
+
+                    car.maker =
                             pick(
                                     object,
                                     "Manufacturer",
@@ -1830,6 +2030,7 @@ public class MainActivity extends Activity {
                                     "Maker",
                                     "maker"
                             );
+
 
                     car.model =
                             pick(
@@ -1842,6 +2043,7 @@ public class MainActivity extends Activity {
                                     "name"
                             );
 
+
                     car.badge =
                             pick(
                                     object,
@@ -1853,6 +2055,7 @@ public class MainActivity extends Activity {
                                     "grade"
                             );
 
+
                     car.year =
                             pick(
                                     object,
@@ -1862,12 +2065,14 @@ public class MainActivity extends Activity {
                                     "formYear"
                             );
 
+
                     car.mileage =
                             pick(
                                     object,
                                     "Mileage",
                                     "mileage"
                             );
+
 
                     car.fuel =
                             pick(
@@ -1878,14 +2083,17 @@ public class MainActivity extends Activity {
                                     "fuel"
                             );
 
+
                     output.put(
                             car.id,
                             car
                     );
                 }
 
+
                 JSONArray names =
                         object.names();
+
 
                 if (
                         names != null
@@ -1897,15 +2105,13 @@ public class MainActivity extends Activity {
                             i++
                     ) {
 
-                        String key =
-                                names.optString(
-                                        i
-                                );
-
                         Object child =
                                 object.opt(
-                                        key
+                                        names.optString(
+                                                i
+                                        )
                                 );
+
 
                         if (
                                 child instanceof JSONObject
@@ -1928,6 +2134,7 @@ public class MainActivity extends Activity {
                 JSONArray array =
                         (JSONArray) node;
 
+
                 for (
                         int i = 0;
                         i < array.length();
@@ -1938,6 +2145,7 @@ public class MainActivity extends Activity {
                             array.opt(
                                     i
                             );
+
 
                     if (
                             child instanceof JSONObject
@@ -1959,6 +2167,166 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    private String pick(
+            JSONObject object,
+            String... wanted
+    ) {
+
+        JSONArray names =
+                object.names();
+
+
+        if (
+                names == null
+        ) {
+
+            return "";
+        }
+
+
+        for (
+                String wantedName : wanted
+        ) {
+
+            for (
+                    int i = 0;
+                    i < names.length();
+                    i++
+            ) {
+
+                String key =
+                        names.optString(
+                                i
+                        );
+
+
+                if (
+                        key.equalsIgnoreCase(
+                                wantedName
+                        )
+                ) {
+
+                    Object value =
+                            object.opt(
+                                    key
+                            );
+
+
+                    if (
+                            value != null
+                                    &&
+                            value != JSONObject.NULL
+                    ) {
+
+                        return String.valueOf(
+                                value
+                        )
+                                .trim();
+                    }
+                }
+            }
+        }
+
+
+        return "";
+    }
+
+
+    private long number(
+            String value
+    ) {
+
+        try {
+
+            String digits =
+                    value.replaceAll(
+                            "[^0-9]",
+                            ""
+                    );
+
+
+            if (
+                    digits.isEmpty()
+            ) {
+
+                return Long.MAX_VALUE;
+            }
+
+
+            return Long.parseLong(
+                    digits
+            );
+
+        } catch (
+                Exception e
+        ) {
+
+            return Long.MAX_VALUE;
+        }
+    }
+
+
+    private void showCars(
+            List<Car> cars,
+            Spec spec
+    ) {
+
+        results.removeAllViews();
+
+
+        if (
+                cars.isEmpty()
+        ) {
+
+            status.setText(
+                    buildStatus(spec)
+                            +
+                    "\nAPI отговорът е успешен, но няма намерени обяви."
+            );
+
+
+            addMessage(
+                    "Няма автомобили по тези критерии."
+            );
+
+
+            return;
+        }
+
+
+        status.setText(
+                buildStatus(spec)
+                        +
+                "\nНамерени "
+                        +
+                cars.size()
+                        +
+                " обяви"
+        );
+
+
+        int limit =
+                Math.min(
+                        100,
+                        cars.size()
+                );
+
+
+        for (
+                int i = 0;
+                i < limit;
+                i++
+        ) {
+
+            addCarCard(
+                    cars.get(i),
+                    i + 1
+            );
+        }
+    }
+
+
     private void addCarCard(
             Car car,
             int position
@@ -1967,29 +2335,35 @@ public class MainActivity extends Activity {
         TextView card =
                 new TextView(this);
 
+
         StringBuilder text =
                 new StringBuilder();
+
 
         text.append(
                 position
         );
 
+
         text.append(
                 ". "
         );
 
+
         if (
-                !car.manufacturer.isEmpty()
+                !car.maker.isEmpty()
         ) {
 
             text.append(
-                    car.manufacturer
+                    car.maker
             );
+
 
             text.append(
                     " "
             );
         }
+
 
         if (
                 !car.model.isEmpty()
@@ -1999,10 +2373,12 @@ public class MainActivity extends Activity {
                     car.model
             );
 
+
             text.append(
                     " "
             );
         }
+
 
         if (
                 !car.badge.isEmpty()
@@ -2013,6 +2389,7 @@ public class MainActivity extends Activity {
             );
         }
 
+
         if (
                 !car.year.isEmpty()
         ) {
@@ -2021,10 +2398,12 @@ public class MainActivity extends Activity {
                     "\nГодина: "
             );
 
+
             text.append(
                     car.year
             );
         }
+
 
         if (
                 !car.mileage.isEmpty()
@@ -2034,16 +2413,17 @@ public class MainActivity extends Activity {
                     " | Пробег: "
             );
 
+
             text.append(
-                    formatNumber(
-                            car.mileage
-                    )
+                    car.mileage
             );
+
 
             text.append(
                     " km"
             );
         }
+
 
         if (
                 !car.fuel.isEmpty()
@@ -2053,44 +2433,47 @@ public class MainActivity extends Activity {
                     " | "
             );
 
+
             text.append(
                     car.fuel
             );
         }
 
+
         text.append(
                 "\nЦена: "
         );
 
-        text.append(
-                formatPrice(
-                        car.price
-                )
-        );
 
         text.append(
-                "\nEncar ID: "
+                car.price
         );
 
+
         text.append(
-                car.id
+                " 만원"
         );
+
 
         text.append(
                 "\nНАТИСНИ ЗА ОБЯВАТА"
         );
 
+
         card.setText(
                 text.toString()
         );
+
 
         card.setTextSize(
                 16f
         );
 
+
         card.setTextColor(
                 Color.BLACK
         );
+
 
         card.setPadding(
                 18,
@@ -2098,6 +2481,7 @@ public class MainActivity extends Activity {
                 18,
                 16
         );
+
 
         card.setBackgroundColor(
                 Color.rgb(
@@ -2107,11 +2491,13 @@ public class MainActivity extends Activity {
                 )
         );
 
+
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                 );
+
 
         params.setMargins(
                 0,
@@ -2120,12 +2506,14 @@ public class MainActivity extends Activity {
                 10
         );
 
+
         card.setOnClickListener(
-                v ->
+                view ->
                         openListing(
                                 car.id
                         )
         );
+
 
         results.addView(
                 card,
@@ -2133,24 +2521,25 @@ public class MainActivity extends Activity {
         );
     }
 
+
     private void openListing(
             String id
     ) {
 
         try {
 
-            String url =
-                    "https://www.encar.com/dc/dc_cardetailview.do?carid="
-                            +
-                    Uri.encode(
-                            id
-                    );
-
             Intent intent =
                     new Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse(url)
+                            Uri.parse(
+                                    "https://fem.encar.com/cars/detail/"
+                                            +
+                                    Uri.encode(
+                                            id
+                                    )
+                            )
                     );
+
 
             startActivity(
                     intent
@@ -2168,164 +2557,56 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String pick(
-            JSONObject object,
-            String... keys
+
+    private void showError(
+            String message
     ) {
 
-        for (
-                String wanted : keys
-        ) {
+        status.setText(
+                message
+        );
 
-            JSONArray names =
-                    object.names();
 
-            if (
-                    names == null
-            ) {
+        results.removeAllViews();
 
-                return "";
-            }
 
-            for (
-                    int i = 0;
-                    i < names.length();
-                    i++
-            ) {
-
-                String actual =
-                        names.optString(
-                                i
-                        );
-
-                if (
-                        actual.equalsIgnoreCase(
-                                wanted
-                        )
-                ) {
-
-                    Object value =
-                            object.opt(
-                                    actual
-                            );
-
-                    if (
-                            value != null
-                                    &&
-                            value != JSONObject.NULL
-                    ) {
-
-                        String result =
-                                String.valueOf(
-                                        value
-                                )
-                                        .trim();
-
-                        if (
-                                !result.isEmpty()
-                                        &&
-                                !"null".equalsIgnoreCase(
-                                        result
-                                )
-                        ) {
-
-                            return result;
-                        }
-                    }
-                }
-            }
-        }
-
-        return "";
-    }
-
-    private long parseNumber(
-            String value
-    ) {
-
-        try {
-
-            String digits =
-                    value.replaceAll(
-                            "[^0-9]",
-                            ""
-                    );
-
-            if (
-                    digits.isEmpty()
-            ) {
-
-                return Long.MAX_VALUE;
-            }
-
-            return Long.parseLong(
-                    digits
-            );
-
-        } catch (
-                Exception e
-        ) {
-
-            return Long.MAX_VALUE;
-        }
-    }
-
-    private String formatPrice(
-            String price
-    ) {
-
-        long number =
-                parseNumber(
-                        price
-                );
-
-        if (
-                number == Long.MAX_VALUE
-        ) {
-
-            return price;
-        }
-
-        if (
-                number < 1000000L
-        ) {
-
-            return String.format(
-                    Locale.US,
-                    "%,d 만원",
-                    number
-            );
-        }
-
-        return String.format(
-                Locale.US,
-                "%,d",
-                number
+        addMessage(
+                message
         );
     }
 
-    private String formatNumber(
-            String value
+
+    private void addMessage(
+            String message
     ) {
 
-        long number =
-                parseNumber(
-                        value
-                );
+        TextView view =
+                new TextView(this);
 
-        if (
-                number == Long.MAX_VALUE
-        ) {
 
-            return value;
-        }
+        view.setText(
+                message
+        );
 
-        return String.format(
-                Locale.US,
-                "%,d",
-                number
+
+        view.setTextSize(
+                16f
+        );
+
+
+        view.setPadding(
+                14,
+                14,
+                14,
+                14
+        );
+
+
+        results.addView(
+                view
         );
     }
+
 
     private boolean containsAny(
             String text,
@@ -2347,8 +2628,10 @@ public class MainActivity extends Activity {
             }
         }
 
+
         return false;
     }
+
 
     private boolean containsPhrase(
             String text,
@@ -2360,12 +2643,14 @@ public class MainActivity extends Activity {
                         value
                 );
 
+
         if (
                 needle.isEmpty()
         ) {
 
             return false;
         }
+
 
         String source =
                 " "
@@ -2374,6 +2659,7 @@ public class MainActivity extends Activity {
                         +
                 " ";
 
+
         String target =
                 " "
                         +
@@ -2381,28 +2667,24 @@ public class MainActivity extends Activity {
                         +
                 " ";
 
-        if (
-                source.contains(
-                        target
-                )
-        ) {
 
-            return true;
-        }
-
-        if (
-                needle.contains("-")
-                        ||
-                needle.contains(".")
-        ) {
-
-            return text.contains(
-                    needle
-            );
-        }
-
-        return false;
+        return source.contains(
+                target
+        )
+                ||
+                (
+                        (
+                                needle.contains("-")
+                                        ||
+                                needle.contains(".")
+                        )
+                                &&
+                        text.contains(
+                                needle
+                        )
+                );
     }
+
 
     private String normalize(
             String value
@@ -2414,6 +2696,7 @@ public class MainActivity extends Activity {
 
             return "";
         }
+
 
         return value
                 .toLowerCase(
@@ -2454,6 +2737,7 @@ public class MainActivity extends Activity {
                 .trim();
     }
 
+
     private void addBrand(
             String key,
             String encar,
@@ -2468,16 +2752,18 @@ public class MainActivity extends Activity {
                         carType
                 );
 
+
         for (
                 String alias : aliases
         ) {
 
-            brandAliases.put(
+            brands.put(
                     normalize(alias),
                     brand
             );
         }
     }
+
 
     private void addModels(
             String brandKey,
@@ -2485,9 +2771,10 @@ public class MainActivity extends Activity {
     ) {
 
         Map<String, String> map =
-                modelAliases.get(
+                models.get(
                         brandKey
                 );
+
 
         if (
                 map == null
@@ -2496,11 +2783,13 @@ public class MainActivity extends Activity {
             map =
                     new LinkedHashMap<>();
 
-            modelAliases.put(
+
+            models.put(
                     brandKey,
                     map
             );
         }
+
 
         for (
                 String row : rows
@@ -2511,6 +2800,7 @@ public class MainActivity extends Activity {
                             "=",
                             2
                     );
+
 
             if (
                     parts.length == 2
@@ -2526,11 +2816,11 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private void initDictionary() {
 
         /*
-         * КОРЕЙСКИ МАРКИ
-         * CarType.Y
+         * KOREAN
          */
 
         addBrand(
@@ -2541,6 +2831,7 @@ public class MainActivity extends Activity {
                 "киа",
                 "кия"
         );
+
 
         addBrand(
                 "hyundai",
@@ -2553,6 +2844,7 @@ public class MainActivity extends Activity {
                 "хюнде"
         );
 
+
         addBrand(
                 "genesis",
                 "제네시스",
@@ -2561,6 +2853,7 @@ public class MainActivity extends Activity {
                 "генезис",
                 "дженезис"
         );
+
 
         addBrand(
                 "chevrolet",
@@ -2571,6 +2864,7 @@ public class MainActivity extends Activity {
                 "шевролет"
         );
 
+
         addBrand(
                 "renault",
                 "르노코리아(삼성)",
@@ -2578,6 +2872,7 @@ public class MainActivity extends Activity {
                 "renault",
                 "рено"
         );
+
 
         addBrand(
                 "kgm",
@@ -2589,9 +2884,9 @@ public class MainActivity extends Activity {
                 "сангйонг"
         );
 
+
         /*
-         * ВНОСНИ МАРКИ
-         * CarType.N
+         * IMPORTED
          */
 
         addBrand(
@@ -2606,6 +2901,7 @@ public class MainActivity extends Activity {
                 "мерседес"
         );
 
+
         addBrand(
                 "bmw",
                 "BMW",
@@ -2614,6 +2910,7 @@ public class MainActivity extends Activity {
                 "бмв"
         );
 
+
         addBrand(
                 "audi",
                 "아우디",
@@ -2621,6 +2918,7 @@ public class MainActivity extends Activity {
                 "audi",
                 "ауди"
         );
+
 
         addBrand(
                 "volkswagen",
@@ -2632,6 +2930,7 @@ public class MainActivity extends Activity {
                 "волксваген"
         );
 
+
         addBrand(
                 "porsche",
                 "포르쉐",
@@ -2639,6 +2938,7 @@ public class MainActivity extends Activity {
                 "porsche",
                 "порше"
         );
+
 
         addBrand(
                 "ford",
@@ -2648,6 +2948,7 @@ public class MainActivity extends Activity {
                 "форд"
         );
 
+
         addBrand(
                 "honda",
                 "혼다",
@@ -2655,6 +2956,7 @@ public class MainActivity extends Activity {
                 "honda",
                 "хонда"
         );
+
 
         addBrand(
                 "peugeot",
@@ -2664,6 +2966,7 @@ public class MainActivity extends Activity {
                 "пежо"
         );
 
+
         addBrand(
                 "volvo",
                 "볼보",
@@ -2671,6 +2974,7 @@ public class MainActivity extends Activity {
                 "volvo",
                 "волво"
         );
+
 
         addBrand(
                 "toyota",
@@ -2680,6 +2984,7 @@ public class MainActivity extends Activity {
                 "тойота"
         );
 
+
         addBrand(
                 "lexus",
                 "렉서스",
@@ -2687,6 +2992,7 @@ public class MainActivity extends Activity {
                 "lexus",
                 "лексус"
         );
+
 
         addBrand(
                 "nissan",
@@ -2697,6 +3003,7 @@ public class MainActivity extends Activity {
                 "ниссан"
         );
 
+
         addBrand(
                 "infiniti",
                 "인피니티",
@@ -2705,6 +3012,7 @@ public class MainActivity extends Activity {
                 "инфинити"
         );
 
+
         addBrand(
                 "tesla",
                 "테슬라",
@@ -2712,6 +3020,7 @@ public class MainActivity extends Activity {
                 "tesla",
                 "тесла"
         );
+
 
         addBrand(
                 "landrover",
@@ -2723,6 +3032,7 @@ public class MainActivity extends Activity {
                 "ленд ровър"
         );
 
+
         addBrand(
                 "jaguar",
                 "재규어",
@@ -2730,6 +3040,7 @@ public class MainActivity extends Activity {
                 "jaguar",
                 "ягуар"
         );
+
 
         addBrand(
                 "jeep",
@@ -2739,6 +3050,7 @@ public class MainActivity extends Activity {
                 "джип"
         );
 
+
         addBrand(
                 "mini",
                 "미니",
@@ -2746,6 +3058,7 @@ public class MainActivity extends Activity {
                 "mini",
                 "мини"
         );
+
 
         addBrand(
                 "cadillac",
@@ -2755,6 +3068,7 @@ public class MainActivity extends Activity {
                 "кадилак"
         );
 
+
         addBrand(
                 "lincoln",
                 "링컨",
@@ -2762,6 +3076,7 @@ public class MainActivity extends Activity {
                 "lincoln",
                 "линкълн"
         );
+
 
         addBrand(
                 "maserati",
@@ -2771,6 +3086,7 @@ public class MainActivity extends Activity {
                 "мазерати"
         );
 
+
         addBrand(
                 "bentley",
                 "벤틀리",
@@ -2778,6 +3094,7 @@ public class MainActivity extends Activity {
                 "bentley",
                 "бентли"
         );
+
 
         addBrand(
                 "ferrari",
@@ -2787,6 +3104,7 @@ public class MainActivity extends Activity {
                 "ферари"
         );
 
+
         addBrand(
                 "lamborghini",
                 "람보르기니",
@@ -2794,6 +3112,7 @@ public class MainActivity extends Activity {
                 "lamborghini",
                 "ламборгини"
         );
+
 
         addBrand(
                 "mclaren",
@@ -2804,79 +3123,9 @@ public class MainActivity extends Activity {
                 "макларън"
         );
 
-        addBrand(
-                "subaru",
-                "스바루",
-                "N",
-                "subaru",
-                "субару"
-        );
-
-        addBrand(
-                "suzuki",
-                "스즈키",
-                "N",
-                "suzuki",
-                "сузуки"
-        );
-
-        addBrand(
-                "mitsubishi",
-                "미쓰비시",
-                "N",
-                "mitsubishi",
-                "мицубиши"
-        );
-
-        addBrand(
-                "mazda",
-                "마쯔다",
-                "N",
-                "mazda",
-                "мазда"
-        );
-
-        addBrand(
-                "citroen",
-                "시트로엥",
-                "N",
-                "citroen",
-                "citroën",
-                "ситроен"
-        );
-
-        addBrand(
-                "fiat",
-                "피아트",
-                "N",
-                "fiat",
-                "фиат"
-        );
-
-        addBrand(
-                "polestar",
-                "폴스타",
-                "N",
-                "polestar",
-                "полстар"
-        );
-
-        addBrand(
-                "byd",
-                "BYD",
-                "N",
-                "byd"
-        );
-
-        addBrand(
-                "gmc",
-                "GMC",
-                "N",
-                "gmc"
-        );
 
         /*
-         * KIA
+         * MODELS
          */
 
         addModels(
@@ -2890,7 +3139,6 @@ public class MainActivity extends Activity {
                 "спортиж=스포티지",
 
                 "carnival=카니발",
-                "карнивал=카니발",
 
                 "seltos=셀토스",
 
@@ -2898,26 +3146,17 @@ public class MainActivity extends Activity {
 
                 "mohave=모하비",
 
-                "morning=모닝",
-
-                "ray=레이",
-
-                "ev3=EV3",
-                "ev4=EV4",
-                "ev5=EV5",
                 "ev6=EV6",
+
                 "ev9=EV9",
 
-                "k3=K3",
                 "k5=K5",
-                "k7=K7",
+
                 "k8=K8",
+
                 "k9=K9"
         );
 
-        /*
-         * HYUNDAI
-         */
 
         addModels(
                 "hyundai",
@@ -2947,113 +3186,117 @@ public class MainActivity extends Activity {
 
                 "sonata=쏘나타",
 
-                "grandeur=그랜저",
-
-                "casper=캐스퍼",
-
-                "nexo=넥쏘"
+                "grandeur=그랜저"
         );
 
-        /*
-         * GENESIS
-         */
 
         addModels(
                 "genesis",
 
                 "g70=G70",
+
                 "g80=G80",
+
                 "g90=G90",
 
                 "gv60=GV60",
+
                 "gv70=GV70",
+
                 "gv80=GV80"
         );
 
-        /*
-         * MERCEDES
-         */
 
         addModels(
                 "mercedes",
 
                 "gle=GLE-클래스",
+
                 "glc=GLC-클래스",
+
                 "gls=GLS-클래스",
 
                 "gla=GLA-클래스",
+
                 "glb=GLB-클래스",
 
                 "cla=CLA-클래스",
+
                 "cls=CLS-클래스",
+
                 "cle=CLE-클래스",
 
                 "eqa=EQA",
+
                 "eqb=EQB",
+
                 "eqe=EQE",
+
                 "eqs=EQS"
         );
 
-        /*
-         * VOLKSWAGEN
-         */
 
         addModels(
                 "volkswagen",
 
                 "tiguan=티구안",
+
                 "тигуан=티구안",
 
                 "touareg=투아렉",
+
                 "туарег=투아렉",
 
                 "golf=골프",
+
                 "голф=골프",
 
                 "passat=파사트",
+
                 "пасат=파사트",
 
                 "arteon=아테온",
+
                 "артеон=아테온",
 
                 "t-roc=티록",
+
                 "t roc=티록",
 
-                "jetta=제타",
-
                 "id.4=ID.4",
+
                 "id4=ID.4",
 
                 "id.5=ID.5",
+
                 "id5=ID.5"
         );
 
-        /*
-         * PORSCHE
-         */
 
         addModels(
                 "porsche",
 
                 "cayenne=카이엔",
+
                 "кайен=카이엔",
 
                 "macan=마칸",
+
                 "макан=마칸",
 
                 "panamera=파나메라",
+
                 "панамера=파나메라",
 
                 "taycan=타이칸",
+
                 "тайкан=타이칸",
 
                 "911=911",
+
                 "718=718"
         );
 
-        /*
-         * FORD
-         */
 
         addModels(
                 "ford",
@@ -3067,28 +3310,26 @@ public class MainActivity extends Activity {
                 "bronco=브롱코",
 
                 "f150=F150",
-                "f-150=F150",
 
-                "expedition=익스페디션"
+                "f-150=F150"
         );
 
-        /*
-         * HONDA
-         */
 
         addModels(
                 "honda",
 
                 "accord=어코드",
+
                 "акорд=어코드",
 
                 "civic=시빅",
-                "сивик=시빅",
 
                 "cr-v=CR-V",
+
                 "crv=CR-V",
 
                 "hr-v=HR-V",
+
                 "hrv=HR-V",
 
                 "odyssey=오딧세이",
@@ -3096,31 +3337,31 @@ public class MainActivity extends Activity {
                 "pilot=파일럿"
         );
 
-        /*
-         * PEUGEOT
-         */
 
         addModels(
                 "peugeot",
 
                 "208=208",
+
                 "308=308",
+
                 "408=408",
+
                 "508=508",
 
                 "2008=2008",
+
                 "3008=3008",
+
                 "5008=5008"
         );
 
-        /*
-         * TOYOTA
-         */
 
         addModels(
                 "toyota",
 
                 "rav4=RAV4",
+
                 "rav 4=RAV4",
 
                 "camry=캠리",
@@ -3129,70 +3370,22 @@ public class MainActivity extends Activity {
 
                 "highlander=하이랜더",
 
-                "sienna=시에나",
-
-                "land cruiser=랜드크루저"
+                "sienna=시에나"
         );
 
-        /*
-         * LEXUS
-         */
-
-        addModels(
-                "lexus",
-
-                "ux=UX",
-                "nx=NX",
-                "rx=RX",
-                "gx=GX",
-                "lx=LX",
-
-                "is=IS",
-                "es=ES",
-                "ls=LS",
-
-                "rc=RC",
-                "lc=LC"
-        );
-
-        /*
-         * VOLVO
-         */
-
-        addModels(
-                "volvo",
-
-                "xc40=XC40",
-                "xc60=XC60",
-                "xc90=XC90",
-
-                "s60=S60",
-                "s90=S90",
-
-                "v60=V60",
-                "v90=V90",
-
-                "ex30=EX30",
-                "ex90=EX90"
-        );
-
-        /*
-         * TESLA
-         */
 
         addModels(
                 "tesla",
 
                 "model 3=모델 3",
+
                 "model y=모델 Y",
 
                 "model s=모델 S",
+
                 "model x=모델 X"
         );
 
-        /*
-         * LAND ROVER
-         */
 
         addModels(
                 "landrover",
@@ -3209,63 +3402,21 @@ public class MainActivity extends Activity {
 
                 "defender=디펜더"
         );
-
-        /*
-         * CHEVROLET KOREA
-         */
-
-        addModels(
-                "chevrolet",
-
-                "trax=트랙스",
-
-                "trailblazer=트레일블레이저",
-
-                "malibu=말리부",
-
-                "spark=스파크",
-
-                "camaro=카마로",
-
-                "colorado=콜로라도",
-
-                "traverse=트래버스",
-
-                "tahoe=타호"
-        );
-
-        /*
-         * KGM / SSANGYONG
-         */
-
-        addModels(
-                "kgm",
-
-                "torres=토레스",
-
-                "rexton=렉스턴",
-
-                "korando=코란도",
-
-                "tivoli=티볼리"
-        );
     }
+
 
     @Override
     protected void onDestroy() {
 
         if (
-                apiWebView != null
+                cookieWebView != null
         ) {
 
-            apiWebView.removeJavascriptInterface(
-                    "EncarApp"
-            );
+            cookieWebView.stopLoading();
 
-            apiWebView.stopLoading();
-
-            apiWebView.destroy();
+            cookieWebView.destroy();
         }
+
 
         super.onDestroy();
     }
