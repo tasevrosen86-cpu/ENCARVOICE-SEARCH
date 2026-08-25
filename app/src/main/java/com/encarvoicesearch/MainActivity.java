@@ -48,6 +48,26 @@ public class MainActivity extends Activity {
     private String lastResult = "";
     private String lastCarUrl = "";
 
+    private static class CarSearchSpec {
+
+        String displayName;
+        String manufacturer;
+        String modelGroup;
+        String exactModel;
+
+        CarSearchSpec(
+                String displayName,
+                String manufacturer,
+                String modelGroup,
+                String exactModel
+        ) {
+            this.displayName = displayName;
+            this.manufacturer = manufacturer;
+            this.modelGroup = modelGroup;
+            this.exactModel = exactModel;
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -60,9 +80,6 @@ public class MainActivity extends Activity {
                 LinearLayout.VERTICAL
         );
 
-        /*
-         * ТЕКСТОВО ПОЛЕ
-         */
         searchInput =
                 new EditText(this);
 
@@ -83,9 +100,6 @@ public class MainActivity extends Activity {
                 15
         );
 
-        /*
-         * БУТОНИ ГЛАС + ТЪРСЕНЕ
-         */
         LinearLayout buttons =
                 new LinearLayout(this);
 
@@ -124,9 +138,6 @@ public class MainActivity extends Activity {
                 buttonParams
         );
 
-        /*
-         * STATUS
-         */
         status =
                 new TextView(this);
 
@@ -145,9 +156,6 @@ public class MainActivity extends Activity {
 
         status.setTextIsSelectable(true);
 
-        /*
-         * ДОЛНИ БУТОНИ
-         */
         LinearLayout tools =
                 new LinearLayout(this);
 
@@ -198,9 +206,6 @@ public class MainActivity extends Activity {
                 toolParams
         );
 
-        /*
-         * WEBVIEW
-         */
         webView =
                 new WebView(this);
 
@@ -225,17 +230,11 @@ public class MainActivity extends Activity {
                         true
                 );
 
-        /*
-         * JS -> ANDROID
-         */
         webView.addJavascriptInterface(
                 new CarReader(),
                 "AndroidCarReader"
         );
 
-        /*
-         * КОГАТО ENCAR РЕЗУЛТАТИТЕ СЕ ЗАРЕДЯТ
-         */
         webView.setWebViewClient(
                 new WebViewClient() {
 
@@ -270,9 +269,6 @@ public class MainActivity extends Activity {
                 }
         );
 
-        /*
-         * UI
-         */
         root.addView(
                 searchInput,
                 new LinearLayout.LayoutParams(
@@ -316,9 +312,6 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        /*
-         * BUTTON ACTIONS
-         */
         voiceButton.setOnClickListener(
                 v -> startVoice()
         );
@@ -340,11 +333,6 @@ public class MainActivity extends Activity {
         );
     }
 
-    /*
-     * ==========================
-     * VOICE
-     * ==========================
-     */
     private void startVoice() {
 
         Intent intent =
@@ -364,7 +352,7 @@ public class MainActivity extends Activity {
 
         intent.putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
-                "Кажи: Kia Sorento 2025 дизел"
+                "Кажи марка, модел, година и гориво"
         );
 
         try {
@@ -419,10 +407,6 @@ public class MainActivity extends Activity {
                 String text =
                         results.get(0);
 
-                /*
-                 * Поправя примерно:
-                 * "20 25" -> "2025"
-                 */
                 text =
                         text.replaceAll(
                                 "\\b20\\s+(\\d{2})\\b",
@@ -440,11 +424,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /*
-     * ==========================
-     * SEARCH PARSER
-     * ==========================
-     */
     private void searchFromInput() {
 
         String original =
@@ -472,26 +451,15 @@ public class MainActivity extends Activity {
                                 " "
                         );
 
-        /*
-         * Засега НЕ разширяваме архитектурата.
-         *
-         * Първо доказваме старото работещо
-         * търсене + глас.
-         */
-        boolean kia =
-                text.contains("kia") ||
-                text.contains("киа") ||
-                text.contains("кия");
+        CarSearchSpec car =
+                detectCar(text);
 
-        boolean sorento =
-                text.contains("sorento") ||
-                text.contains("соренто");
-
-        if (!kia || !sorento) {
+        if (car == null) {
 
             status.setText(
-                    "Тази тестова версия засега е за Kia Sorento.\n" +
-                    "Първо потвърждаваме работещата основа."
+                    "Засега разпознавам:\n" +
+                    "• Kia Sorento\n" +
+                    "• Hyundai Palisade"
             );
 
             return;
@@ -504,18 +472,6 @@ public class MainActivity extends Activity {
 
             status.setText(
                     "Не разпознах годината."
-            );
-
-            return;
-        }
-
-        if (
-                year < 2023 ||
-                year > 2026
-        ) {
-
-            status.setText(
-                    "Тази работеща Sorento основа е за поколението 2023–2026."
             );
 
             return;
@@ -547,30 +503,87 @@ public class MainActivity extends Activity {
             fuelName =
                     "GASOLINE";
 
+        } else if (
+                text.contains("хибрид") ||
+                text.contains("hybrid")
+        ) {
+
+            fuelKorean =
+                    "가솔린+전기";
+
+            fuelName =
+                    "HYBRID";
+
         } else {
 
             status.setText(
                     "Не разпознах горивото.\n" +
-                    "Кажи дизел или бензин."
+                    "Кажи дизел, бензин или хибрид."
             );
 
             return;
         }
 
-        searchSorento(
+        searchCar(
+                car,
                 year,
                 fuelKorean,
                 fuelName
         );
     }
 
+    private CarSearchSpec detectCar(
+            String text
+    ) {
+
+        boolean kia =
+                text.contains("kia") ||
+                text.contains("киа") ||
+                text.contains("кия");
+
+        boolean sorento =
+                text.contains("sorento") ||
+                text.contains("соренто");
+
+        if (kia && sorento) {
+
+            return new CarSearchSpec(
+                    "Kia Sorento",
+                    "기아",
+                    "쏘렌토",
+                    "더 뉴 쏘렌토 4세대"
+            );
+        }
+
+        boolean hyundai =
+                text.contains("hyundai") ||
+                text.contains("хюндай") ||
+                text.contains("хундай") ||
+                text.contains("хендай") ||
+                text.contains("хюнде");
+
+        boolean palisade =
+                text.contains("palisade") ||
+                text.contains("палисейд") ||
+                text.contains("палисад");
+
+        if (hyundai && palisade) {
+
+            return new CarSearchSpec(
+                    "Hyundai Palisade",
+                    "현대",
+                    "팰리세이드",
+                    null
+            );
+        }
+
+        return null;
+    }
+
     private Integer findYear(
             String text
     ) {
 
-        /*
-         * 20 25 -> 2025
-         */
         text =
                 text.replaceAll(
                         "\\b20\\s+(\\d{2})\\b",
@@ -597,12 +610,9 @@ public class MainActivity extends Activity {
             }
         }
 
-        /*
-         * "25 година" -> 2025
-         */
         Matcher shortYear =
                 Pattern.compile(
-                        "\\b(2[3-6])\\s*(?:г|година|год)?\\b"
+                        "\\b(1[5-9]|2[0-6])\\s*(?:г|година|год)?\\b"
                 )
                         .matcher(text);
 
@@ -624,12 +634,8 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    /*
-     * ==========================
-     * СТАРАТА РАБОТЕЩА ОСНОВА
-     * ==========================
-     */
-    private void searchSorento(
+    private void searchCar(
+            CarSearchSpec car,
             int year,
             String fuel,
             String fuelName
@@ -641,62 +647,138 @@ public class MainActivity extends Activity {
         int yearTo =
                 yearFrom + 99;
 
+        StringBuilder action =
+                new StringBuilder();
+
+        action.append(
+                "(And.Year.range("
+        );
+
+        action.append(
+                yearFrom
+        );
+
+        action.append(
+                ".."
+        );
+
+        action.append(
+                yearTo
+        );
+
+        action.append(
+                ")."
+        );
+
+        action.append(
+                "_.Hidden.N."
+        );
+
+        action.append(
+                "_." +
+                "(Or.Separation.F._.Separation.B.)"
+        );
+
+        action.append(
+                "_.SellType.일반."
+        );
+
+        action.append(
+                "_.(C.CarType.Y."
+        );
+
+        action.append(
+                "_.(C.Manufacturer."
+        );
+
+        action.append(
+                car.manufacturer
+        );
+
+        action.append(
+                "."
+        );
+
+        action.append(
+                "_.(C.ModelGroup."
+        );
+
+        action.append(
+                car.modelGroup
+        );
+
+        action.append(
+                "."
+        );
+
         /*
-         * ВАЖНО:
+         * Sorento:
+         * запазваме точно доказано
+         * работещия Model.
          *
-         * Не сменяме работещата Encar структура.
+         * Palisade:
+         * не гадаем Model поколението.
          */
-        String action =
-                "(And.Year.range(" +
-                yearFrom +
-                ".." +
-                yearTo +
-                ")." +
+        if (
+                car.exactModel != null &&
+                !car.exactModel.isEmpty()
+        ) {
 
-                "_.Hidden.N." +
+            action.append(
+                    "_.Model."
+            );
 
-                "_." +
-                "(Or.Separation.F._.Separation.B.)" +
+            action.append(
+                    car.exactModel
+            );
 
-                "_." +
-                "SellType.일반." +
+            action.append(
+                    "."
+            );
+        }
 
-                "_." +
-                "(C.CarType.Y." +
+        action.append(
+                ")"
+        );
 
-                "_." +
-                "(C.Manufacturer.기아." +
+        action.append(
+                ")"
+        );
 
-                "_." +
-                "(C.ModelGroup.쏘렌토." +
+        action.append(
+                ")"
+        );
 
-                "_." +
-                "Model.더 뉴 쏘렌토 4세대." +
+        action.append(
+                "_.FuelType."
+        );
 
-                ")" +
-                ")" +
-                ")" +
+        action.append(
+                fuel
+        );
 
-                "_." +
-                "FuelType." +
-                fuel +
-                "." +
+        action.append(
+                "."
+        );
 
-                ")";
+        action.append(
+                ")"
+        );
 
         String json =
                 "{" +
                 "\"type\":\"car\"," +
+
                 "\"action\":\"" +
                 action +
                 "\"," +
 
-                "\"title\":\"Kia The New Sorento 4Th(23년~현재)\"," +
-
                 "\"toggle\":{}," +
+
                 "\"layer\":\"\"," +
 
                 "\"sort\":\"MobilePriceAsc\"" +
+
                 "}";
 
         try {
@@ -715,7 +797,9 @@ public class MainActivity extends Activity {
             lastCarUrl = "";
 
             status.setText(
-                    "Търся Kia Sorento " +
+                    "Търся " +
+                    car.displayName +
+                    " " +
                     year +
                     " " +
                     fuelName +
@@ -735,11 +819,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /*
-     * ==========================
-     * READ FIRST REAL CAR
-     * ==========================
-     */
     private void startReading() {
 
         readAttempts = 0;
@@ -826,6 +905,7 @@ public class MainActivity extends Activity {
                 "text.match(/" +
                 "(가솔린 하이브리드|" +
                 "디젤 하이브리드|" +
+                "가솔린\\+전기|" +
                 "디젤|" +
                 "가솔린|" +
                 "전기|" +
@@ -878,11 +958,6 @@ public class MainActivity extends Activity {
         );
     }
 
-    /*
-     * ==========================
-     * RECEIVE CAR
-     * ==========================
-     */
     private class CarReader {
 
         @JavascriptInterface
@@ -1046,11 +1121,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /*
-     * ==========================
-     * OPEN FIRST CAR
-     * ==========================
-     */
     private void openFirstCar() {
 
         if (
@@ -1070,11 +1140,6 @@ public class MainActivity extends Activity {
         );
     }
 
-    /*
-     * ==========================
-     * COPY
-     * ==========================
-     */
     private void copyResult() {
 
         String text =
