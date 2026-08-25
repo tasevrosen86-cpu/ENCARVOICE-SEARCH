@@ -22,7 +22,9 @@ import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public class MainActivity extends Activity {
 
@@ -39,6 +41,24 @@ public class MainActivity extends Activity {
     private static final String TARGET_SEARCH_API =
             "api.encar.com/search/car/list/mobile";
 
+    private final Object responseLock = new Object();
+
+    private final Map<String, ResponseCapture> responses =
+            new HashMap<>();
+
+
+    private static class ResponseCapture {
+
+        String source;
+        String method;
+        String url;
+        int status;
+        String contentType;
+
+        StringBuilder body =
+                new StringBuilder();
+    }
+
 
     @SuppressLint({
             "SetJavaScriptEnabled",
@@ -46,30 +66,37 @@ public class MainActivity extends Activity {
     })
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
         super.onCreate(savedInstanceState);
 
         createUi();
 
-        WebSettings settings = webView.getSettings();
+        WebSettings settings =
+                webView.getSettings();
 
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
+
         settings.setLoadsImagesAutomatically(true);
+
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
+
+        settings.setAllowContentAccess(true);
+        settings.setAllowFileAccess(true);
 
         CookieManager cookieManager =
                 CookieManager.getInstance();
 
         cookieManager.setAcceptCookie(true);
 
-        CookieManager.getInstance()
-                .setAcceptThirdPartyCookies(
-                        webView,
-                        true
-                );
+        cookieManager.setAcceptThirdPartyCookies(
+                webView,
+                true
+        );
 
 
         webView.addJavascriptInterface(
@@ -96,17 +123,13 @@ public class MainActivity extends Activity {
 
                         if (
                                 scanning &&
-                                url != null &&
-                                !url.isEmpty()
+                                url != null
                         ) {
 
                             appendLog(
-                                    "------------------------------\n" +
-                                    "SOURCE: PAGE\n" +
-                                    "EVENT: STARTED\n" +
-                                    "URL:\n" +
-                                    url +
-                                    "\n"
+                                    "\n------------------------------\n" +
+                                    "PAGE STARTED\n" +
+                                    url + "\n"
                             );
                         }
                     }
@@ -125,24 +148,22 @@ public class MainActivity extends Activity {
 
                         injectNetworkInterceptor();
 
-                        if (
-                                scanning &&
-                                url != null &&
-                                !url.isEmpty()
-                        ) {
 
-                            appendLog(
-                                    "------------------------------\n" +
-                                    "SOURCE: PAGE\n" +
-                                    "EVENT: FINISHED\n" +
-                                    "URL:\n" +
-                                    url +
-                                    "\n"
-                            );
-                        }
+                        webView.postDelayed(
+                                new Runnable() {
+
+                                    @Override
+                                    public void run() {
+
+                                        injectNetworkInterceptor();
+                                    }
+                                },
+                                1000
+                        );
+
 
                         statusText.setText(
-                                "SCANNER ACTIVE"
+                                "SCANNER ACTIVE - промени филтър в Encar"
                         );
                     }
 
@@ -155,38 +176,29 @@ public class MainActivity extends Activity {
 
                         if (
                                 scanning &&
-                                request != null
+                                request != null &&
+                                request.getUrl() != null
                         ) {
 
-                            String url = "";
+                            String url =
+                                    request
+                                            .getUrl()
+                                            .toString();
 
-                            if (request.getUrl() != null) {
-                                url =
-                                        request
-                                                .getUrl()
-                                                .toString();
-                            }
-
-                            /*
-                             * Записваме основно Encar API,
-                             * за да няма огромен шум от
-                             * картинки, Google, реклами и т.н.
-                             */
                             if (
                                     url.contains(
-                                            "api.encar.com"
+                                            TARGET_SEARCH_API
                                     )
                             ) {
 
                                 appendLog(
-                                        "------------------------------\n" +
-                                        "SOURCE: WEBVIEW\n" +
+                                        "\n==============================\n" +
+                                        "WEBVIEW REQUEST\n" +
                                         "METHOD: " +
                                         request.getMethod() +
-                                        "\n" +
-                                        "URL:\n" +
+                                        "\nURL:\n" +
                                         url +
-                                        "\n"
+                                        "\n==============================\n"
                                 );
                             }
                         }
@@ -207,12 +219,6 @@ public class MainActivity extends Activity {
         );
     }
 
-
-    /*
-     * =========================================
-     * UI
-     * =========================================
-     */
 
     private void createUi() {
 
@@ -239,33 +245,25 @@ public class MainActivity extends Activity {
         Button startButton =
                 new Button(this);
 
-        startButton.setText(
-                "START"
-        );
+        startButton.setText("START");
 
 
         Button stopButton =
                 new Button(this);
 
-        stopButton.setText(
-                "STOP"
-        );
+        stopButton.setText("STOP");
 
 
         Button copyButton =
                 new Button(this);
 
-        copyButton.setText(
-                "COPY"
-        );
+        copyButton.setText("COPY");
 
 
         Button clearButton =
                 new Button(this);
 
-        clearButton.setText(
-                "CLEAR"
-        );
+        clearButton.setText("CLEAR");
 
 
         startButton.setOnClickListener(
@@ -274,7 +272,7 @@ public class MainActivity extends Activity {
                     startNewScan();
 
                     Toast.makeText(
-                            MainActivity.this,
+                            this,
                             "Scan started",
                             Toast.LENGTH_SHORT
                     ).show();
@@ -296,15 +294,16 @@ public class MainActivity extends Activity {
                 v -> {
 
                     synchronized (scanLog) {
+
                         scanLog.setLength(0);
                     }
 
                     statusText.setText(
-                            "LOG CLEARED"
+                            "Log cleared"
                     );
 
                     Toast.makeText(
-                            MainActivity.this,
+                            this,
                             "Log cleared",
                             Toast.LENGTH_SHORT
                     ).show();
@@ -327,29 +326,17 @@ public class MainActivity extends Activity {
 
         controls.addView(
                 stopButton,
-                new LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                )
+                buttonParams
         );
 
         controls.addView(
                 copyButton,
-                new LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                )
+                buttonParams
         );
 
         controls.addView(
                 clearButton,
-                new LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                )
+                buttonParams
         );
 
 
@@ -360,15 +347,13 @@ public class MainActivity extends Activity {
                 "Scanner loading..."
         );
 
-        statusText.setTextSize(
-                14f
-        );
+        statusText.setTextSize(14f);
 
         statusText.setPadding(
                 16,
-                8,
+                10,
                 16,
-                8
+                10
         );
 
 
@@ -404,17 +389,9 @@ public class MainActivity extends Activity {
         );
 
 
-        setContentView(
-                root
-        );
+        setContentView(root);
     }
 
-
-    /*
-     * =========================================
-     * START SCAN
-     * =========================================
-     */
 
     private void startNewScan() {
 
@@ -441,24 +418,18 @@ public class MainActivity extends Activity {
             );
         }
 
+
+        synchronized (responseLock) {
+
+            responses.clear();
+        }
+
+
         statusText.setText(
                 "SCANNING..."
         );
-
-
-        /*
-         * Ако страницата вече е заредена,
-         * инжектираме скенера веднага.
-         */
-        injectNetworkInterceptor();
     }
 
-
-    /*
-     * =========================================
-     * STOP
-     * =========================================
-     */
 
     private void stopScan() {
 
@@ -466,19 +437,22 @@ public class MainActivity extends Activity {
             return;
         }
 
+
         appendLog(
-                "------------------------------\n" +
-                "===== SCAN STOPPED =====\n" +
-                "TIME: " +
+                "\n==============================\n" +
+                "SCAN STOPPED\n" +
                 currentTime() +
-                "\n"
+                "\n==============================\n"
         );
 
+
         scanning = false;
+
 
         statusText.setText(
                 "SCAN STOPPED"
         );
+
 
         Toast.makeText(
                 this,
@@ -487,12 +461,6 @@ public class MainActivity extends Activity {
         ).show();
     }
 
-
-    /*
-     * =========================================
-     * COPY
-     * =========================================
-     */
 
     private void copyScan() {
 
@@ -505,10 +473,7 @@ public class MainActivity extends Activity {
         }
 
 
-        if (
-                text == null ||
-                text.trim().isEmpty()
-        ) {
+        if (text.trim().isEmpty()) {
 
             Toast.makeText(
                     this,
@@ -527,15 +492,11 @@ public class MainActivity extends Activity {
                         );
 
 
-        ClipData clipData =
+        clipboard.setPrimaryClip(
                 ClipData.newPlainText(
                         "ENCAR NETWORK SCAN",
                         text
-                );
-
-
-        clipboard.setPrimaryClip(
-                clipData
+                )
         );
 
 
@@ -547,12 +508,6 @@ public class MainActivity extends Activity {
     }
 
 
-    /*
-     * =========================================
-     * LOG
-     * =========================================
-     */
-
     private void appendLog(
             String text
     ) {
@@ -561,19 +516,14 @@ public class MainActivity extends Activity {
             return;
         }
 
+
         synchronized (scanLog) {
 
-            scanLog.append(
-                    text
-            );
+            scanLog.append(text);
 
-            if (
-                    !text.endsWith("\n")
-            ) {
+            if (!text.endsWith("\n")) {
 
-                scanLog.append(
-                        "\n"
-                );
+                scanLog.append("\n");
             }
         }
     }
@@ -581,563 +531,456 @@ public class MainActivity extends Activity {
 
     private String currentTime() {
 
-        SimpleDateFormat formatter =
-                new SimpleDateFormat(
-                        "yyyy-MM-dd HH:mm:ss",
-                        Locale.getDefault()
-                );
-
-        return formatter.format(
+        return new SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss",
+                Locale.getDefault()
+        ).format(
                 new Date()
         );
     }
 
 
-    /*
-     * =========================================
-     *
-     * JAVASCRIPT NETWORK INTERCEPTOR
-     *
-     * ТУК ХВАЩАМЕ FETCH + XHR RESPONSE BODY
-     *
-     * =========================================
-     */
-
     private void injectNetworkInterceptor() {
 
-        if (
-                webView == null
-        ) {
-            return;
-        }
+        String js =
 
+                "(function() {" +
 
-        String javascript = """
-                (function() {
+                "if(window.__ENCAR_RESPONSE_SCANNER__===true){" +
+                "return;" +
+                "}" +
 
-                    if (window.__ENCAR_SCANNER_INSTALLED__) {
-                        return;
-                    }
+                "window.__ENCAR_RESPONSE_SCANNER__=true;" +
 
-                    window.__ENCAR_SCANNER_INSTALLED__ = true;
 
-                    const TARGET_API =
-                        "api.encar.com/search/car/list/mobile";
+                "var TARGET='api.encar.com/search/car/list/mobile';" +
 
+                "var responseCounter=0;" +
 
-                    function safeString(value) {
 
-                        if (
-                            value === undefined ||
-                            value === null
-                        ) {
-                            return "";
-                        }
+                "function absUrl(u){" +
 
-                        try {
+                "try{" +
 
-                            if (
-                                typeof value === "string"
-                            ) {
-                                return value;
-                            }
+                "return new URL(String(u||''),window.location.href).href;" +
 
+                "}catch(e){" +
 
-                            if (
-                                value instanceof URLSearchParams
-                            ) {
-                                return value.toString();
-                            }
+                "return String(u||'');" +
 
+                "}" +
 
-                            if (
-                                value instanceof FormData
-                            ) {
+                "}" +
 
-                                const obj = {};
 
-                                value.forEach(
-                                    function(v, k) {
+                "function isTarget(u){" +
 
-                                        obj[k] =
-                                            String(v);
-                                    }
-                                );
+                "var x=absUrl(u);" +
 
-                                return JSON.stringify(
-                                    obj
-                                );
-                            }
+                "return x.indexOf(TARGET)!==-1;" +
 
+                "}" +
 
-                            return JSON.stringify(
-                                value
-                            );
 
-                        } catch (e) {
+                "function safeString(v){" +
 
-                            try {
+                "if(v===undefined||v===null){" +
+                "return '';" +
+                "}" +
 
-                                return String(
-                                    value
-                                );
+                "try{" +
 
-                            } catch (e2) {
+                "if(typeof v==='string'){" +
+                "return v;" +
+                "}" +
 
-                                return "";
-                            }
-                        }
-                    }
+                "return JSON.stringify(v);" +
 
+                "}catch(e){" +
 
-                    function sendRequest(
-                        source,
-                        method,
-                        url,
-                        body
-                    ) {
+                "try{" +
+                "return String(v);" +
+                "}catch(e2){" +
+                "return '';" +
+                "}" +
 
-                        try {
+                "}" +
 
-                            window.AndroidNetworkScanner.onRequest(
-                                String(source || ""),
-                                String(method || "GET"),
-                                String(url || ""),
-                                safeString(body)
-                            );
+                "}" +
 
-                        } catch (e) {
-                        }
-                    }
 
+                "function reportRequest(source,method,url,body){" +
 
-                    function sendResponse(
-                        source,
-                        method,
-                        url,
-                        status,
-                        contentType,
-                        body
-                    ) {
+                "url=absUrl(url);" +
 
-                        try {
+                "if(!isTarget(url)){" +
+                "return;" +
+                "}" +
 
-                            window.AndroidNetworkScanner.onResponse(
-                                String(source || ""),
-                                String(method || "GET"),
-                                String(url || ""),
-                                Number(status || 0),
-                                String(contentType || ""),
-                                String(body || "")
-                            );
+                "try{" +
 
-                        } catch (e) {
-                        }
-                    }
+                "window.AndroidNetworkScanner.onRequest(" +
 
+                "String(source||'')," +
 
-                    /*
-                     * ============================
-                     * FETCH
-                     * ============================
-                     */
+                "String(method||'GET')," +
 
-                    if (window.fetch) {
+                "String(url||'')," +
 
-                        const originalFetch =
-                            window.fetch;
+                "safeString(body)" +
 
+                ");" +
 
-                        window.fetch =
-                            async function(input, init) {
+                "}catch(e){}" +
 
-                                let url = "";
-                                let method = "GET";
-                                let requestBody = "";
+                "}" +
 
 
-                                try {
+                "function reportResponse(" +
+                "source," +
+                "method," +
+                "url," +
+                "status," +
+                "contentType," +
+                "body" +
+                "){" +
 
-                                    if (
-                                        typeof input === "string"
-                                    ) {
+                "url=absUrl(url);" +
 
-                                        url = input;
+                "if(!isTarget(url)){" +
+                "return;" +
+                "}" +
 
-                                    } else if (
-                                        input &&
-                                        input.url
-                                    ) {
+                "body=String(body||'');" +
 
-                                        url =
-                                            input.url;
-                                    }
+                "responseCounter++;" +
 
+                "var id='R'+Date.now()+'_'+responseCounter;" +
 
-                                    if (
-                                        init &&
-                                        init.method
-                                    ) {
+                "try{" +
 
-                                        method =
-                                            init.method;
+                "window.AndroidNetworkScanner.onResponseStart(" +
 
-                                    } else if (
-                                        input &&
-                                        input.method
-                                    ) {
+                "id," +
 
-                                        method =
-                                            input.method;
-                                    }
+                "String(source||'')," +
 
+                "String(method||'GET')," +
 
-                                    if (
-                                        init &&
-                                        init.body !== undefined
-                                    ) {
+                "String(url||'')," +
 
-                                        requestBody =
-                                            init.body;
-                                    }
+                "Number(status||0)," +
 
-                                } catch (e) {
-                                }
+                "String(contentType||'')," +
 
+                "body.length" +
 
-                                if (
-                                    url.indexOf(
-                                        "api.encar.com"
-                                    ) !== -1
-                                ) {
+                ");" +
 
-                                    sendRequest(
-                                        "FETCH",
-                                        method,
-                                        url,
-                                        requestBody
-                                    );
-                                }
 
+                "var chunkSize=30000;" +
 
-                                let response;
+                "for(" +
+                "var i=0;" +
+                "i<body.length;" +
+                "i+=chunkSize" +
+                "){" +
 
+                "window.AndroidNetworkScanner.onResponseChunk(" +
 
-                                try {
+                "id," +
 
-                                    response =
-                                        await originalFetch.apply(
-                                            this,
-                                            arguments
-                                        );
+                "body.substring(" +
+                "i," +
+                "Math.min(i+chunkSize,body.length)" +
+                ")" +
 
-                                } catch (error) {
+                ");" +
 
+                "}" +
 
-                                    if (
-                                        url.indexOf(
-                                            TARGET_API
-                                        ) !== -1
-                                    ) {
 
-                                        sendResponse(
-                                            "FETCH",
-                                            method,
-                                            url,
-                                            0,
-                                            "",
-                                            "FETCH ERROR: " +
-                                                String(error)
-                                        );
-                                    }
+                "window.AndroidNetworkScanner.onResponseEnd(id);" +
 
+                "}catch(e){}" +
 
-                                    throw error;
-                                }
+                "}" +
 
 
-                                /*
-                                 * Това е най-важната част.
-                                 *
-                                 * clone() позволява да прочетем
-                                 * response body без да счупим
-                                 * оригиналния Encar response.
-                                 */
+                "if(window.fetch){" +
 
-                                try {
+                "var originalFetch=window.fetch;" +
 
-                                    if (
-                                        url.indexOf(
-                                            TARGET_API
-                                        ) !== -1
-                                    ) {
 
-                                        const clonedResponse =
-                                            response.clone();
+                "window.fetch=async function(input,init){" +
 
+                "var url='';" +
+                "var method='GET';" +
+                "var requestBody='';" +
 
-                                        let contentType = "";
 
+                "try{" +
 
-                                        try {
+                "if(typeof input==='string'){" +
 
-                                            contentType =
-                                                response.headers.get(
-                                                    "content-type"
-                                                ) || "";
+                "url=input;" +
 
-                                        } catch (e) {
-                                        }
+                "}else if(input&&input.url){" +
 
+                "url=input.url;" +
 
-                                        clonedResponse.text()
-                                            .then(
-                                                function(bodyText) {
+                "}" +
 
-                                                    sendResponse(
-                                                        "FETCH",
-                                                        method,
-                                                        url,
-                                                        response.status,
-                                                        contentType,
-                                                        bodyText
-                                                    );
-                                                }
-                                            )
-                                            .catch(
-                                                function(error) {
 
-                                                    sendResponse(
-                                                        "FETCH",
-                                                        method,
-                                                        url,
-                                                        response.status,
-                                                        contentType,
-                                                        "RESPONSE READ ERROR: " +
-                                                            String(error)
-                                                    );
-                                                }
-                                            );
-                                    }
+                "if(init&&init.method){" +
 
-                                } catch (error) {
+                "method=init.method;" +
 
-                                    if (
-                                        url.indexOf(
-                                            TARGET_API
-                                        ) !== -1
-                                    ) {
+                "}else if(input&&input.method){" +
 
-                                        sendResponse(
-                                            "FETCH",
-                                            method,
-                                            url,
-                                            response
-                                                ? response.status
-                                                : 0,
-                                            "",
-                                            "RESPONSE CLONE ERROR: " +
-                                                String(error)
-                                        );
-                                    }
-                                }
+                "method=input.method;" +
 
+                "}" +
 
-                                return response;
-                            };
-                    }
 
+                "if(init&&init.body!==undefined){" +
 
-                    /*
-                     * ============================
-                     * XMLHttpRequest
-                     * ============================
-                     */
+                "requestBody=init.body;" +
 
-                    if (
-                        window.XMLHttpRequest
-                    ) {
+                "}" +
 
-                        const originalOpen =
-                            XMLHttpRequest
-                                .prototype
-                                .open;
+                "}catch(e){}" +
 
 
-                        const originalSend =
-                            XMLHttpRequest
-                                .prototype
-                                .send;
+                "reportRequest(" +
+                "'FETCH'," +
+                "method," +
+                "url," +
+                "requestBody" +
+                ");" +
 
 
-                        XMLHttpRequest
-                            .prototype
-                            .open =
-                            function(
-                                method,
-                                url
-                            ) {
+                "var response;" +
 
-                                try {
 
-                                    this.__scannerMethod =
-                                        method || "GET";
+                "try{" +
 
-                                    this.__scannerUrl =
-                                        url || "";
+                "response=await originalFetch.apply(this,arguments);" +
 
-                                } catch (e) {
-                                }
+                "}catch(error){" +
 
+                "if(isTarget(url)){" +
 
-                                return originalOpen.apply(
-                                    this,
-                                    arguments
-                                );
-                            };
+                "reportResponse(" +
+                "'FETCH'," +
+                "method," +
+                "url," +
+                "0," +
+                "''," +
+                "'FETCH ERROR: '+String(error)" +
+                ");" +
 
+                "}" +
 
-                        XMLHttpRequest
-                            .prototype
-                            .send =
-                            function(body) {
+                "throw error;" +
 
-                                const xhr =
-                                    this;
+                "}" +
 
 
-                                const method =
-                                    xhr.__scannerMethod ||
-                                    "GET";
+                "try{" +
 
+                "if(isTarget(url)){" +
 
-                                const url =
-                                    xhr.__scannerUrl ||
-                                    "";
+                "var clone=response.clone();" +
 
+                "var contentType='';" +
 
-                                if (
-                                    url.indexOf(
-                                        "api.encar.com"
-                                    ) !== -1
-                                ) {
 
-                                    sendRequest(
-                                        "XHR",
-                                        method,
-                                        url,
-                                        body
-                                    );
-                                }
+                "try{" +
 
+                "contentType=" +
+                "response.headers.get('content-type')||'';" +
 
-                                if (
-                                    url.indexOf(
-                                        TARGET_API
-                                    ) !== -1
-                                ) {
+                "}catch(e){}" +
 
-                                    xhr.addEventListener(
-                                        "loadend",
-                                        function() {
 
-                                            let responseBody =
-                                                "";
+                "clone.text()" +
 
-                                            let contentType =
-                                                "";
+                ".then(function(text){" +
 
+                "reportResponse(" +
+                "'FETCH'," +
+                "method," +
+                "url," +
+                "response.status," +
+                "contentType," +
+                "text" +
+                ");" +
 
-                                            try {
+                "})" +
 
-                                                contentType =
-                                                    xhr.getResponseHeader(
-                                                        "content-type"
-                                                    ) || "";
+                ".catch(function(error){" +
 
-                                            } catch (e) {
-                                            }
+                "reportResponse(" +
+                "'FETCH'," +
+                "method," +
+                "url," +
+                "response.status," +
+                "contentType," +
+                "'READ ERROR: '+String(error)" +
+                ");" +
 
+                "});" +
 
-                                            try {
+                "}" +
 
-                                                if (
-                                                    xhr.responseType === "" ||
-                                                    xhr.responseType === "text"
-                                                ) {
+                "}catch(e){" +
 
-                                                    responseBody =
-                                                        xhr.responseText ||
-                                                        "";
+                "if(isTarget(url)){" +
 
-                                                } else if (
-                                                    xhr.responseType === "json"
-                                                ) {
+                "reportResponse(" +
+                "'FETCH'," +
+                "method," +
+                "url," +
+                "response?response.status:0," +
+                "''," +
+                "'CLONE ERROR: '+String(e)" +
+                ");" +
 
-                                                    responseBody =
-                                                        JSON.stringify(
-                                                            xhr.response
-                                                        );
+                "}" +
 
-                                                } else {
+                "}" +
 
-                                                    responseBody =
-                                                        safeString(
-                                                            xhr.response
-                                                        );
-                                                }
 
-                                            } catch (e) {
+                "return response;" +
 
-                                                responseBody =
-                                                    "XHR RESPONSE READ ERROR: " +
-                                                    String(e);
-                                            }
+                "};" +
 
+                "}" +
 
-                                            sendResponse(
-                                                "XHR",
-                                                method,
-                                                url,
-                                                xhr.status,
-                                                contentType,
-                                                responseBody
-                                            );
-                                        }
-                                    );
-                                }
 
+                "if(window.XMLHttpRequest){" +
 
-                                return originalSend.apply(
-                                    this,
-                                    arguments
-                                );
-                            };
-                    }
+                "var originalOpen=" +
+                "XMLHttpRequest.prototype.open;" +
 
+                "var originalSend=" +
+                "XMLHttpRequest.prototype.send;" +
 
-                    console.log(
-                        "ENCAR Network Scanner installed"
-                    );
 
-                })();
-                """;
+                "XMLHttpRequest.prototype.open=" +
+
+                "function(method,url){" +
+
+                "this.__encarMethod=method||'GET';" +
+
+                "this.__encarUrl=url||'';" +
+
+                "return originalOpen.apply(this,arguments);" +
+
+                "};" +
+
+
+                "XMLHttpRequest.prototype.send=" +
+
+                "function(body){" +
+
+                "var xhr=this;" +
+
+                "var method=xhr.__encarMethod||'GET';" +
+
+                "var url=xhr.__encarUrl||'';" +
+
+
+                "reportRequest(" +
+                "'XHR'," +
+                "method," +
+                "url," +
+                "body" +
+                ");" +
+
+
+                "if(isTarget(url)){" +
+
+                "xhr.addEventListener(" +
+                "'loadend'," +
+
+                "function(){" +
+
+                "var responseBody='';" +
+
+                "var contentType='';" +
+
+
+                "try{" +
+
+                "contentType=" +
+                "xhr.getResponseHeader('content-type')||'';" +
+
+                "}catch(e){}" +
+
+
+                "try{" +
+
+                "if(" +
+                "xhr.responseType===''||" +
+                "xhr.responseType==='text'" +
+                "){" +
+
+                "responseBody=xhr.responseText||'';" +
+
+                "}else if(xhr.responseType==='json'){" +
+
+                "responseBody=JSON.stringify(xhr.response);" +
+
+                "}else{" +
+
+                "responseBody=safeString(xhr.response);" +
+
+                "}" +
+
+                "}catch(e){" +
+
+                "responseBody=" +
+                "'XHR READ ERROR: '+String(e);" +
+
+                "}" +
+
+
+                "reportResponse(" +
+                "'XHR'," +
+                "method," +
+                "url," +
+                "xhr.status," +
+                "contentType," +
+                "responseBody" +
+                ");" +
+
+                "}" +
+
+                ");" +
+
+                "}" +
+
+
+                "return originalSend.apply(this,arguments);" +
+
+                "};" +
+
+                "}" +
+
+
+                "console.log('ENCAR RESPONSE SCANNER INSTALLED');" +
+
+                "})();";
 
 
         webView.evaluateJavascript(
-                javascript,
+                js,
                 null
         );
     }
 
-
-    /*
-     * =========================================
-     *
-     * JAVASCRIPT -> ANDROID BRIDGE
-     *
-     * =========================================
-     */
 
     public class NetworkBridge {
 
@@ -1157,21 +1000,11 @@ public class MainActivity extends Activity {
 
             if (
                     url == null ||
-                    url.trim().isEmpty()
-            ) {
-                return;
-            }
-
-
-            /*
-             * Пазим само Encar API заявки.
-             */
-
-            if (
                     !url.contains(
-                            "api.encar.com"
+                            TARGET_SEARCH_API
                     )
             ) {
+
                 return;
             }
 
@@ -1181,46 +1014,32 @@ public class MainActivity extends Activity {
 
 
             block.append(
-                    "------------------------------\n"
+                    "\n========================================\n"
+            );
+
+            block.append(
+                    "===== ENCAR SEARCH API REQUEST =====\n"
             );
 
             block.append(
                     "SOURCE: "
             );
 
-            block.append(
-                    source
-            );
+            block.append(source);
 
             block.append(
-                    "\n"
+                    "\nMETHOD: "
             );
 
+            block.append(method);
 
             block.append(
-                    "METHOD: "
+                    "\nURL:\n"
             );
 
-            block.append(
-                    method
-            );
+            block.append(url);
 
-            block.append(
-                    "\n"
-            );
-
-
-            block.append(
-                    "URL:\n"
-            );
-
-            block.append(
-                    url
-            );
-
-            block.append(
-                    "\n"
-            );
+            block.append("\n");
 
 
             if (
@@ -1229,17 +1048,22 @@ public class MainActivity extends Activity {
             ) {
 
                 block.append(
-                        "BODY:\n"
+                        "\nREQUEST BODY:\n"
                 );
 
-                block.append(
-                        body
-                );
+                block.append(body);
 
-                block.append(
-                        "\n"
-                );
+                block.append("\n");
             }
+
+
+            block.append(
+                    "===== END REQUEST =====\n"
+            );
+
+            block.append(
+                    "========================================\n"
+            );
 
 
             appendLog(
@@ -1248,22 +1072,15 @@ public class MainActivity extends Activity {
         }
 
 
-        /*
-         * ======================================
-         *
-         * ТОВА Е RESPONSE BODY
-         *
-         * ======================================
-         */
-
         @JavascriptInterface
-        public void onResponse(
+        public void onResponseStart(
+                String id,
                 String source,
                 String method,
                 String url,
                 int status,
                 String contentType,
-                String body
+                int bodyLength
         ) {
 
             if (!scanning) {
@@ -1277,6 +1094,93 @@ public class MainActivity extends Activity {
                             TARGET_SEARCH_API
                     )
             ) {
+
+                return;
+            }
+
+
+            ResponseCapture capture =
+                    new ResponseCapture();
+
+
+            capture.source =
+                    source;
+
+            capture.method =
+                    method;
+
+            capture.url =
+                    url;
+
+            capture.status =
+                    status;
+
+            capture.contentType =
+                    contentType;
+
+
+            synchronized (responseLock) {
+
+                responses.put(
+                        id,
+                        capture
+                );
+            }
+        }
+
+
+        @JavascriptInterface
+        public void onResponseChunk(
+                String id,
+                String chunk
+        ) {
+
+            if (!scanning) {
+                return;
+            }
+
+
+            synchronized (responseLock) {
+
+                ResponseCapture capture =
+                        responses.get(id);
+
+                if (capture == null) {
+                    return;
+                }
+
+
+                if (chunk != null) {
+
+                    capture.body.append(
+                            chunk
+                    );
+                }
+            }
+        }
+
+
+        @JavascriptInterface
+        public void onResponseEnd(
+                String id
+        ) {
+
+            if (!scanning) {
+                return;
+            }
+
+
+            ResponseCapture capture;
+
+
+            synchronized (responseLock) {
+
+                capture =
+                        responses.remove(id);
+            }
+
+
+            if (capture == null) {
                 return;
             }
 
@@ -1286,11 +1190,7 @@ public class MainActivity extends Activity {
 
 
             block.append(
-                    "\n"
-            );
-
-            block.append(
-                    "========================================\n"
+                    "\n\n========================================\n"
             );
 
             block.append(
@@ -1307,92 +1207,57 @@ public class MainActivity extends Activity {
             );
 
             block.append(
-                    source
-            );
-
-            block.append(
-                    "\n"
+                    capture.source
             );
 
 
             block.append(
-                    "METHOD: "
+                    "\nMETHOD: "
             );
 
             block.append(
-                    method
-            );
-
-            block.append(
-                    "\n"
+                    capture.method
             );
 
 
             block.append(
-                    "STATUS: "
+                    "\nSTATUS: "
             );
 
             block.append(
-                    status
-            );
-
-            block.append(
-                    "\n"
+                    capture.status
             );
 
 
             block.append(
-                    "CONTENT-TYPE: "
+                    "\nCONTENT-TYPE: "
             );
 
             block.append(
-                    contentType
-            );
-
-            block.append(
-                    "\n"
+                    capture.contentType
             );
 
 
             block.append(
-                    "URL:\n"
+                    "\nURL:\n"
             );
 
             block.append(
-                    url
-            );
-
-            block.append(
-                    "\n\n"
+                    capture.url
             );
 
 
             block.append(
-                    "RESPONSE BODY:\n"
+                    "\n\nRESPONSE BODY:\n"
             );
 
-
-            if (body != null) {
-
-                block.append(
-                        body
-                );
-
-            } else {
-
-                block.append(
-                        "(empty)"
-                );
-            }
-
-
             block.append(
-                    "\n"
+                    capture.body
             );
 
 
             block.append(
-                    "===== END ENCAR SEARCH API RESPONSE =====\n"
+                    "\n\n===== END ENCAR SEARCH API RESPONSE =====\n"
             );
 
             block.append(
@@ -1406,29 +1271,27 @@ public class MainActivity extends Activity {
 
 
             runOnUiThread(
-                    () -> {
+                    new Runnable() {
 
-                        statusText.setText(
-                                "✅ ENCAR JSON CAPTURED"
-                        );
+                        @Override
+                        public void run() {
+
+                            statusText.setText(
+                                    "JSON CAPTURED - STOP + COPY"
+                            );
 
 
-                        Toast.makeText(
-                                MainActivity.this,
-                                "ENCAR JSON captured!",
-                                Toast.LENGTH_LONG
-                        ).show();
+                            Toast.makeText(
+                                    MainActivity.this,
+                                    "ENCAR JSON captured",
+                                    Toast.LENGTH_LONG
+                            ).show();
+                        }
                     }
             );
         }
     }
 
-
-    /*
-     * =========================================
-     * BACK
-     * =========================================
-     */
 
     @Override
     public void onBackPressed() {
@@ -1447,31 +1310,24 @@ public class MainActivity extends Activity {
     }
 
 
-    /*
-     * =========================================
-     * DESTROY
-     * =========================================
-     */
-
     @Override
     protected void onDestroy() {
 
-        try {
+        if (webView != null) {
 
-            if (
-                    webView != null
-            ) {
+            try {
 
                 webView.removeJavascriptInterface(
                         "AndroidNetworkScanner"
                 );
 
+                webView.stopLoading();
+
                 webView.destroy();
+
+            } catch (Exception ignored) {
             }
-
-        } catch (Exception ignored) {
         }
-
 
         super.onDestroy();
     }
