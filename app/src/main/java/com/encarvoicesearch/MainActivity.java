@@ -1,936 +1,1478 @@
-package com.example.encarnetworkscanner
+package com.encarvoicesearch;
 
-import android.annotation.SuppressLint
-import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.graphics.Color
-import android.os.Bundle
-import android.view.View
-import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import android.widget.Toast
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
 
-class MainActivity : Activity() {
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
-    private lateinit var webView: WebView
-    private lateinit var statusText: TextView
+public class MainActivity extends Activity {
 
-    private val scanLog = StringBuilder()
+    private WebView webView;
+    private TextView statusText;
 
-    @Volatile
-    private var scanning = true
+    private final StringBuilder scanLog = new StringBuilder();
 
-    private val startUrl = "https://m.encar.com/ca/search.do"
+    private volatile boolean scanning = true;
 
-    // Само този API response е най-важен за нас.
-    private val targetSearchApi =
-        "api.encar.com/search/car/list/mobile"
+    private static final String START_URL =
+            "https://m.encar.com/ca/search.do";
 
-    @SuppressLint("SetJavaScriptEnabled")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    private static final String TARGET_SEARCH_API =
+            "api.encar.com/search/car/list/mobile";
 
-        createUi()
 
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            javaScriptCanOpenWindowsAutomatically = true
-            loadsImagesAutomatically = true
-            useWideViewPort = true
-            loadWithOverviewMode = true
-        }
+    @SuppressLint({
+            "SetJavaScriptEnabled",
+            "JavascriptInterface"
+    })
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true)
-        }
+        createUi();
+
+        WebSettings settings = webView.getSettings();
+
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        settings.setLoadsImagesAutomatically(true);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+
+        CookieManager cookieManager =
+                CookieManager.getInstance();
+
+        cookieManager.setAcceptCookie(true);
+
+        CookieManager.getInstance()
+                .setAcceptThirdPartyCookies(
+                        webView,
+                        true
+                );
+
 
         webView.addJavascriptInterface(
-            NetworkBridge(),
-            "AndroidNetworkScanner"
-        )
+                new NetworkBridge(),
+                "AndroidNetworkScanner"
+        );
 
-        webView.webViewClient = object : WebViewClient() {
 
-            override fun onPageStarted(
-                view: WebView?,
-                url: String?,
-                favicon: android.graphics.Bitmap?
-            ) {
-                super.onPageStarted(view, url, favicon)
+        webView.setWebViewClient(
+                new WebViewClient() {
 
-                if (scanning && !url.isNullOrBlank()) {
-                    appendLog(
-                        """
-------------------------------
-SOURCE: PAGE
-EVENT: STARTED
-URL:
-$url
-""".trimIndent()
-                    )
+                    @Override
+                    public void onPageStarted(
+                            WebView view,
+                            String url,
+                            Bitmap favicon
+                    ) {
+
+                        super.onPageStarted(
+                                view,
+                                url,
+                                favicon
+                        );
+
+                        if (
+                                scanning &&
+                                url != null &&
+                                !url.isEmpty()
+                        ) {
+
+                            appendLog(
+                                    "------------------------------\n" +
+                                    "SOURCE: PAGE\n" +
+                                    "EVENT: STARTED\n" +
+                                    "URL:\n" +
+                                    url +
+                                    "\n"
+                            );
+                        }
+                    }
+
+
+                    @Override
+                    public void onPageFinished(
+                            WebView view,
+                            String url
+                    ) {
+
+                        super.onPageFinished(
+                                view,
+                                url
+                        );
+
+                        injectNetworkInterceptor();
+
+                        if (
+                                scanning &&
+                                url != null &&
+                                !url.isEmpty()
+                        ) {
+
+                            appendLog(
+                                    "------------------------------\n" +
+                                    "SOURCE: PAGE\n" +
+                                    "EVENT: FINISHED\n" +
+                                    "URL:\n" +
+                                    url +
+                                    "\n"
+                            );
+                        }
+
+                        statusText.setText(
+                                "SCANNER ACTIVE"
+                        );
+                    }
+
+
+                    @Override
+                    public WebResourceResponse shouldInterceptRequest(
+                            WebView view,
+                            WebResourceRequest request
+                    ) {
+
+                        if (
+                                scanning &&
+                                request != null
+                        ) {
+
+                            String url = "";
+
+                            if (request.getUrl() != null) {
+                                url =
+                                        request
+                                                .getUrl()
+                                                .toString();
+                            }
+
+                            /*
+                             * Записваме основно Encar API,
+                             * за да няма огромен шум от
+                             * картинки, Google, реклами и т.н.
+                             */
+                            if (
+                                    url.contains(
+                                            "api.encar.com"
+                                    )
+                            ) {
+
+                                appendLog(
+                                        "------------------------------\n" +
+                                        "SOURCE: WEBVIEW\n" +
+                                        "METHOD: " +
+                                        request.getMethod() +
+                                        "\n" +
+                                        "URL:\n" +
+                                        url +
+                                        "\n"
+                                );
+                            }
+                        }
+
+                        return super.shouldInterceptRequest(
+                                view,
+                                request
+                        );
+                    }
                 }
-            }
+        );
 
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageFinished(view, url)
 
-                injectNetworkInterceptor()
+        startNewScan();
 
-                if (scanning && !url.isNullOrBlank()) {
-                    appendLog(
-                        """
-------------------------------
-SOURCE: PAGE
-EVENT: FINISHED
-URL:
-$url
-""".trimIndent()
-                    )
-                }
-
-                statusText.text = "Scanner active"
-            }
-
-            override fun shouldInterceptRequest(
-                view: WebView?,
-                request: WebResourceRequest?
-            ): android.webkit.WebResourceResponse? {
-
-                if (scanning && request != null) {
-
-                    val url = request.url?.toString() ?: ""
-
-                    appendLog(
-                        """
-------------------------------
-SOURCE: WEBVIEW
-METHOD: ${request.method}
-URL:
-$url
-""".trimIndent()
-                    )
-                }
-
-                return super.shouldInterceptRequest(view, request)
-            }
-        }
-
-        startNewScan()
-
-        webView.loadUrl(startUrl)
-    }
-
-    private fun createUi() {
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
-        }
-
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        val startButton = Button(this).apply {
-            text = "START"
-
-            setOnClickListener {
-                startNewScan()
-                Toast.makeText(
-                    this@MainActivity,
-                    "Scan started",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-
-        val stopButton = Button(this).apply {
-            text = "STOP"
-
-            setOnClickListener {
-                stopScan()
-            }
-        }
-
-        val copyButton = Button(this).apply {
-            text = "COPY"
-
-            setOnClickListener {
-                copyScan()
-            }
-        }
-
-        val clearButton = Button(this).apply {
-            text = "CLEAR"
-
-            setOnClickListener {
-                synchronized(scanLog) {
-                    scanLog.clear()
-                }
-
-                statusText.text = "Log cleared"
-
-                Toast.makeText(
-                    this@MainActivity,
-                    "Log cleared",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-
-        controls.addView(
-            startButton,
-            LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-        )
-
-        controls.addView(
-            stopButton,
-            LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-        )
-
-        controls.addView(
-            copyButton,
-            LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-        )
-
-        controls.addView(
-            clearButton,
-            LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-        )
-
-        statusText = TextView(this).apply {
-            text = "Scanner loading..."
-            textSize = 14f
-            setPadding(16, 8, 16, 8)
-        }
-
-        webView = WebView(this)
-
-        root.addView(
-            controls,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        )
-
-        root.addView(
-            statusText,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        )
-
-        root.addView(
-            webView,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
-
-        setContentView(root)
-    }
-
-    private fun startNewScan() {
-
-        scanning = true
-
-        synchronized(scanLog) {
-
-            scanLog.clear()
-
-            scanLog.append(
-                """
-===== ENCAR NETWORK SCAN =====
-STARTED: ${currentTime()}
-
-""".trimIndent()
-            )
-
-            scanLog.append("\n")
-        }
-
-        statusText.text = "SCANNING..."
-    }
-
-    private fun stopScan() {
-
-        if (!scanning) {
-            return
-        }
-
-        appendLog(
-            """
-------------------------------
-===== SCAN STOPPED =====
-TIME: ${currentTime()}
-""".trimIndent()
-        )
-
-        scanning = false
-
-        statusText.text = "SCAN STOPPED"
-
-        Toast.makeText(
-            this,
-            "Scan stopped",
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
-    private fun copyScan() {
-
-        val text = synchronized(scanLog) {
-            scanLog.toString()
-        }
-
-        if (text.isBlank()) {
-
-            Toast.makeText(
-                this,
-                "Nothing to copy",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            return
-        }
-
-        val clipboard =
-            getSystemService(Context.CLIPBOARD_SERVICE)
-                    as ClipboardManager
-
-        clipboard.setPrimaryClip(
-            ClipData.newPlainText(
-                "ENCAR NETWORK SCAN",
-                text
-            )
-        )
-
-        Toast.makeText(
-            this,
-            "Scan copied",
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
-    private fun appendLog(text: String) {
-
-        if (!scanning) {
-            return
-        }
-
-        synchronized(scanLog) {
-
-            scanLog.append(text)
-
-            if (!text.endsWith("\n")) {
-                scanLog.append("\n")
-            }
-        }
-    }
-
-    private fun currentTime(): String {
-
-        return SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss",
-            Locale.getDefault()
-        ).format(Date())
-    }
-
-    private fun injectNetworkInterceptor() {
-
-        val javascript = """
-(function() {
-
-    if (window.__ENCAR_SCANNER_INSTALLED__) {
-        return;
-    }
-
-    window.__ENCAR_SCANNER_INSTALLED__ = true;
-
-    const TARGET_API =
-        "api.encar.com/search/car/list/mobile";
-
-
-    function safeString(value) {
-
-        if (value === undefined || value === null) {
-            return "";
-        }
-
-        try {
-
-            if (typeof value === "string") {
-                return value;
-            }
-
-            if (value instanceof URLSearchParams) {
-                return value.toString();
-            }
-
-            if (value instanceof FormData) {
-
-                const obj = {};
-
-                value.forEach(function(v, k) {
-                    obj[k] = String(v);
-                });
-
-                return JSON.stringify(obj);
-            }
-
-            return JSON.stringify(value);
-
-        } catch (e) {
-
-            try {
-                return String(value);
-            } catch (e2) {
-                return "";
-            }
-        }
-    }
-
-
-    function reportRequest(
-        source,
-        method,
-        url,
-        body
-    ) {
-
-        try {
-
-            window.AndroidNetworkScanner.onRequest(
-                String(source || ""),
-                String(method || "GET"),
-                String(url || ""),
-                safeString(body)
-            );
-
-        } catch (e) {
-        }
-    }
-
-
-    function reportResponse(
-        source,
-        method,
-        url,
-        status,
-        contentType,
-        body
-    ) {
-
-        try {
-
-            window.AndroidNetworkScanner.onResponse(
-                String(source || ""),
-                String(method || "GET"),
-                String(url || ""),
-                Number(status || 0),
-                String(contentType || ""),
-                String(body || "")
-            );
-
-        } catch (e) {
-        }
+        webView.loadUrl(
+                START_URL
+        );
     }
 
 
     /*
-     * ==========================
-     * FETCH INTERCEPTOR
-     * ==========================
+     * =========================================
+     * UI
+     * =========================================
      */
 
-    if (window.fetch) {
+    private void createUi() {
 
-        const originalFetch = window.fetch;
+        LinearLayout root =
+                new LinearLayout(this);
 
-        window.fetch = async function(input, init) {
+        root.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
-            let url = "";
-            let method = "GET";
-            let requestBody = "";
+        root.setBackgroundColor(
+                Color.WHITE
+        );
 
-            try {
 
-                if (typeof input === "string") {
-                    url = input;
+        LinearLayout controls =
+                new LinearLayout(this);
 
-                } else if (input && input.url) {
-                    url = input.url;
+        controls.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+
+        Button startButton =
+                new Button(this);
+
+        startButton.setText(
+                "START"
+        );
+
+
+        Button stopButton =
+                new Button(this);
+
+        stopButton.setText(
+                "STOP"
+        );
+
+
+        Button copyButton =
+                new Button(this);
+
+        copyButton.setText(
+                "COPY"
+        );
+
+
+        Button clearButton =
+                new Button(this);
+
+        clearButton.setText(
+                "CLEAR"
+        );
+
+
+        startButton.setOnClickListener(
+                v -> {
+
+                    startNewScan();
+
+                    Toast.makeText(
+                            MainActivity.this,
+                            "Scan started",
+                            Toast.LENGTH_SHORT
+                    ).show();
                 }
+        );
 
-                if (init && init.method) {
-                    method = init.method;
 
-                } else if (input && input.method) {
-                    method = input.method;
+        stopButton.setOnClickListener(
+                v -> stopScan()
+        );
+
+
+        copyButton.setOnClickListener(
+                v -> copyScan()
+        );
+
+
+        clearButton.setOnClickListener(
+                v -> {
+
+                    synchronized (scanLog) {
+                        scanLog.setLength(0);
+                    }
+
+                    statusText.setText(
+                            "LOG CLEARED"
+                    );
+
+                    Toast.makeText(
+                            MainActivity.this,
+                            "Log cleared",
+                            Toast.LENGTH_SHORT
+                    ).show();
                 }
+        );
 
-                if (init && init.body !== undefined) {
-                    requestBody = init.body;
-                }
 
-            } catch (e) {
-            }
+        LinearLayout.LayoutParams buttonParams =
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                );
 
-            reportRequest(
-                "FETCH",
-                method,
-                url,
-                requestBody
+
+        controls.addView(
+                startButton,
+                buttonParams
+        );
+
+        controls.addView(
+                stopButton,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+        controls.addView(
+                copyButton,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+        controls.addView(
+                clearButton,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+
+        statusText =
+                new TextView(this);
+
+        statusText.setText(
+                "Scanner loading..."
+        );
+
+        statusText.setTextSize(
+                14f
+        );
+
+        statusText.setPadding(
+                16,
+                8,
+                16,
+                8
+        );
+
+
+        webView =
+                new WebView(this);
+
+
+        root.addView(
+                controls,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+
+        root.addView(
+                statusText,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+
+        root.addView(
+                webView,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0,
+                        1f
+                )
+        );
+
+
+        setContentView(
+                root
+        );
+    }
+
+
+    /*
+     * =========================================
+     * START SCAN
+     * =========================================
+     */
+
+    private void startNewScan() {
+
+        scanning = true;
+
+        synchronized (scanLog) {
+
+            scanLog.setLength(0);
+
+            scanLog.append(
+                    "===== ENCAR NETWORK SCAN =====\n"
             );
 
-            let response;
+            scanLog.append(
+                    "STARTED: "
+            );
 
-            try {
+            scanLog.append(
+                    currentTime()
+            );
 
-                response =
-                    await originalFetch.apply(
-                        this,
-                        arguments
-                    );
+            scanLog.append(
+                    "\n\n"
+            );
+        }
 
-            } catch (error) {
+        statusText.setText(
+                "SCANNING..."
+        );
 
-                if (
-                    url &&
-                    url.indexOf(TARGET_API) !== -1
-                ) {
 
-                    reportResponse(
-                        "FETCH",
+        /*
+         * Ако страницата вече е заредена,
+         * инжектираме скенера веднага.
+         */
+        injectNetworkInterceptor();
+    }
+
+
+    /*
+     * =========================================
+     * STOP
+     * =========================================
+     */
+
+    private void stopScan() {
+
+        if (!scanning) {
+            return;
+        }
+
+        appendLog(
+                "------------------------------\n" +
+                "===== SCAN STOPPED =====\n" +
+                "TIME: " +
+                currentTime() +
+                "\n"
+        );
+
+        scanning = false;
+
+        statusText.setText(
+                "SCAN STOPPED"
+        );
+
+        Toast.makeText(
+                this,
+                "Scan stopped",
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+
+    /*
+     * =========================================
+     * COPY
+     * =========================================
+     */
+
+    private void copyScan() {
+
+        String text;
+
+        synchronized (scanLog) {
+
+            text =
+                    scanLog.toString();
+        }
+
+
+        if (
+                text == null ||
+                text.trim().isEmpty()
+        ) {
+
+            Toast.makeText(
+                    this,
+                    "Nothing to copy",
+                    Toast.LENGTH_SHORT
+            ).show();
+
+            return;
+        }
+
+
+        ClipboardManager clipboard =
+                (ClipboardManager)
+                        getSystemService(
+                                Context.CLIPBOARD_SERVICE
+                        );
+
+
+        ClipData clipData =
+                ClipData.newPlainText(
+                        "ENCAR NETWORK SCAN",
+                        text
+                );
+
+
+        clipboard.setPrimaryClip(
+                clipData
+        );
+
+
+        Toast.makeText(
+                this,
+                "Scan copied",
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+
+    /*
+     * =========================================
+     * LOG
+     * =========================================
+     */
+
+    private void appendLog(
+            String text
+    ) {
+
+        if (!scanning) {
+            return;
+        }
+
+        synchronized (scanLog) {
+
+            scanLog.append(
+                    text
+            );
+
+            if (
+                    !text.endsWith("\n")
+            ) {
+
+                scanLog.append(
+                        "\n"
+                );
+            }
+        }
+    }
+
+
+    private String currentTime() {
+
+        SimpleDateFormat formatter =
+                new SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm:ss",
+                        Locale.getDefault()
+                );
+
+        return formatter.format(
+                new Date()
+        );
+    }
+
+
+    /*
+     * =========================================
+     *
+     * JAVASCRIPT NETWORK INTERCEPTOR
+     *
+     * ТУК ХВАЩАМЕ FETCH + XHR RESPONSE BODY
+     *
+     * =========================================
+     */
+
+    private void injectNetworkInterceptor() {
+
+        if (
+                webView == null
+        ) {
+            return;
+        }
+
+
+        String javascript = """
+                (function() {
+
+                    if (window.__ENCAR_SCANNER_INSTALLED__) {
+                        return;
+                    }
+
+                    window.__ENCAR_SCANNER_INSTALLED__ = true;
+
+                    const TARGET_API =
+                        "api.encar.com/search/car/list/mobile";
+
+
+                    function safeString(value) {
+
+                        if (
+                            value === undefined ||
+                            value === null
+                        ) {
+                            return "";
+                        }
+
+                        try {
+
+                            if (
+                                typeof value === "string"
+                            ) {
+                                return value;
+                            }
+
+
+                            if (
+                                value instanceof URLSearchParams
+                            ) {
+                                return value.toString();
+                            }
+
+
+                            if (
+                                value instanceof FormData
+                            ) {
+
+                                const obj = {};
+
+                                value.forEach(
+                                    function(v, k) {
+
+                                        obj[k] =
+                                            String(v);
+                                    }
+                                );
+
+                                return JSON.stringify(
+                                    obj
+                                );
+                            }
+
+
+                            return JSON.stringify(
+                                value
+                            );
+
+                        } catch (e) {
+
+                            try {
+
+                                return String(
+                                    value
+                                );
+
+                            } catch (e2) {
+
+                                return "";
+                            }
+                        }
+                    }
+
+
+                    function sendRequest(
+                        source,
                         method,
                         url,
-                        0,
-                        "",
-                        "FETCH ERROR: " + String(error)
-                    );
-                }
+                        body
+                    ) {
 
-                throw error;
+                        try {
+
+                            window.AndroidNetworkScanner.onRequest(
+                                String(source || ""),
+                                String(method || "GET"),
+                                String(url || ""),
+                                safeString(body)
+                            );
+
+                        } catch (e) {
+                        }
+                    }
+
+
+                    function sendResponse(
+                        source,
+                        method,
+                        url,
+                        status,
+                        contentType,
+                        body
+                    ) {
+
+                        try {
+
+                            window.AndroidNetworkScanner.onResponse(
+                                String(source || ""),
+                                String(method || "GET"),
+                                String(url || ""),
+                                Number(status || 0),
+                                String(contentType || ""),
+                                String(body || "")
+                            );
+
+                        } catch (e) {
+                        }
+                    }
+
+
+                    /*
+                     * ============================
+                     * FETCH
+                     * ============================
+                     */
+
+                    if (window.fetch) {
+
+                        const originalFetch =
+                            window.fetch;
+
+
+                        window.fetch =
+                            async function(input, init) {
+
+                                let url = "";
+                                let method = "GET";
+                                let requestBody = "";
+
+
+                                try {
+
+                                    if (
+                                        typeof input === "string"
+                                    ) {
+
+                                        url = input;
+
+                                    } else if (
+                                        input &&
+                                        input.url
+                                    ) {
+
+                                        url =
+                                            input.url;
+                                    }
+
+
+                                    if (
+                                        init &&
+                                        init.method
+                                    ) {
+
+                                        method =
+                                            init.method;
+
+                                    } else if (
+                                        input &&
+                                        input.method
+                                    ) {
+
+                                        method =
+                                            input.method;
+                                    }
+
+
+                                    if (
+                                        init &&
+                                        init.body !== undefined
+                                    ) {
+
+                                        requestBody =
+                                            init.body;
+                                    }
+
+                                } catch (e) {
+                                }
+
+
+                                if (
+                                    url.indexOf(
+                                        "api.encar.com"
+                                    ) !== -1
+                                ) {
+
+                                    sendRequest(
+                                        "FETCH",
+                                        method,
+                                        url,
+                                        requestBody
+                                    );
+                                }
+
+
+                                let response;
+
+
+                                try {
+
+                                    response =
+                                        await originalFetch.apply(
+                                            this,
+                                            arguments
+                                        );
+
+                                } catch (error) {
+
+
+                                    if (
+                                        url.indexOf(
+                                            TARGET_API
+                                        ) !== -1
+                                    ) {
+
+                                        sendResponse(
+                                            "FETCH",
+                                            method,
+                                            url,
+                                            0,
+                                            "",
+                                            "FETCH ERROR: " +
+                                                String(error)
+                                        );
+                                    }
+
+
+                                    throw error;
+                                }
+
+
+                                /*
+                                 * Това е най-важната част.
+                                 *
+                                 * clone() позволява да прочетем
+                                 * response body без да счупим
+                                 * оригиналния Encar response.
+                                 */
+
+                                try {
+
+                                    if (
+                                        url.indexOf(
+                                            TARGET_API
+                                        ) !== -1
+                                    ) {
+
+                                        const clonedResponse =
+                                            response.clone();
+
+
+                                        let contentType = "";
+
+
+                                        try {
+
+                                            contentType =
+                                                response.headers.get(
+                                                    "content-type"
+                                                ) || "";
+
+                                        } catch (e) {
+                                        }
+
+
+                                        clonedResponse.text()
+                                            .then(
+                                                function(bodyText) {
+
+                                                    sendResponse(
+                                                        "FETCH",
+                                                        method,
+                                                        url,
+                                                        response.status,
+                                                        contentType,
+                                                        bodyText
+                                                    );
+                                                }
+                                            )
+                                            .catch(
+                                                function(error) {
+
+                                                    sendResponse(
+                                                        "FETCH",
+                                                        method,
+                                                        url,
+                                                        response.status,
+                                                        contentType,
+                                                        "RESPONSE READ ERROR: " +
+                                                            String(error)
+                                                    );
+                                                }
+                                            );
+                                    }
+
+                                } catch (error) {
+
+                                    if (
+                                        url.indexOf(
+                                            TARGET_API
+                                        ) !== -1
+                                    ) {
+
+                                        sendResponse(
+                                            "FETCH",
+                                            method,
+                                            url,
+                                            response
+                                                ? response.status
+                                                : 0,
+                                            "",
+                                            "RESPONSE CLONE ERROR: " +
+                                                String(error)
+                                        );
+                                    }
+                                }
+
+
+                                return response;
+                            };
+                    }
+
+
+                    /*
+                     * ============================
+                     * XMLHttpRequest
+                     * ============================
+                     */
+
+                    if (
+                        window.XMLHttpRequest
+                    ) {
+
+                        const originalOpen =
+                            XMLHttpRequest
+                                .prototype
+                                .open;
+
+
+                        const originalSend =
+                            XMLHttpRequest
+                                .prototype
+                                .send;
+
+
+                        XMLHttpRequest
+                            .prototype
+                            .open =
+                            function(
+                                method,
+                                url
+                            ) {
+
+                                try {
+
+                                    this.__scannerMethod =
+                                        method || "GET";
+
+                                    this.__scannerUrl =
+                                        url || "";
+
+                                } catch (e) {
+                                }
+
+
+                                return originalOpen.apply(
+                                    this,
+                                    arguments
+                                );
+                            };
+
+
+                        XMLHttpRequest
+                            .prototype
+                            .send =
+                            function(body) {
+
+                                const xhr =
+                                    this;
+
+
+                                const method =
+                                    xhr.__scannerMethod ||
+                                    "GET";
+
+
+                                const url =
+                                    xhr.__scannerUrl ||
+                                    "";
+
+
+                                if (
+                                    url.indexOf(
+                                        "api.encar.com"
+                                    ) !== -1
+                                ) {
+
+                                    sendRequest(
+                                        "XHR",
+                                        method,
+                                        url,
+                                        body
+                                    );
+                                }
+
+
+                                if (
+                                    url.indexOf(
+                                        TARGET_API
+                                    ) !== -1
+                                ) {
+
+                                    xhr.addEventListener(
+                                        "loadend",
+                                        function() {
+
+                                            let responseBody =
+                                                "";
+
+                                            let contentType =
+                                                "";
+
+
+                                            try {
+
+                                                contentType =
+                                                    xhr.getResponseHeader(
+                                                        "content-type"
+                                                    ) || "";
+
+                                            } catch (e) {
+                                            }
+
+
+                                            try {
+
+                                                if (
+                                                    xhr.responseType === "" ||
+                                                    xhr.responseType === "text"
+                                                ) {
+
+                                                    responseBody =
+                                                        xhr.responseText ||
+                                                        "";
+
+                                                } else if (
+                                                    xhr.responseType === "json"
+                                                ) {
+
+                                                    responseBody =
+                                                        JSON.stringify(
+                                                            xhr.response
+                                                        );
+
+                                                } else {
+
+                                                    responseBody =
+                                                        safeString(
+                                                            xhr.response
+                                                        );
+                                                }
+
+                                            } catch (e) {
+
+                                                responseBody =
+                                                    "XHR RESPONSE READ ERROR: " +
+                                                    String(e);
+                                            }
+
+
+                                            sendResponse(
+                                                "XHR",
+                                                method,
+                                                url,
+                                                xhr.status,
+                                                contentType,
+                                                responseBody
+                                            );
+                                        }
+                                    );
+                                }
+
+
+                                return originalSend.apply(
+                                    this,
+                                    arguments
+                                );
+                            };
+                    }
+
+
+                    console.log(
+                        "ENCAR Network Scanner installed"
+                    );
+
+                })();
+                """;
+
+
+        webView.evaluateJavascript(
+                javascript,
+                null
+        );
+    }
+
+
+    /*
+     * =========================================
+     *
+     * JAVASCRIPT -> ANDROID BRIDGE
+     *
+     * =========================================
+     */
+
+    public class NetworkBridge {
+
+
+        @JavascriptInterface
+        public void onRequest(
+                String source,
+                String method,
+                String url,
+                String body
+        ) {
+
+            if (!scanning) {
+                return;
+            }
+
+
+            if (
+                    url == null ||
+                    url.trim().isEmpty()
+            ) {
+                return;
             }
 
 
             /*
-             * Тук прихващаме RESPONSE BODY
-             * само на Encar search API.
+             * Пазим само Encar API заявки.
              */
-            try {
 
-                if (
-                    url &&
-                    url.indexOf(TARGET_API) !== -1
-                ) {
-
-                    const clone = response.clone();
-
-                    const contentType =
-                        response.headers
-                            ? (
-                                response.headers.get(
-                                    "content-type"
-                                ) || ""
-                              )
-                            : "";
-
-                    clone.text()
-                        .then(function(bodyText) {
-
-                            reportResponse(
-                                "FETCH",
-                                method,
-                                url,
-                                response.status,
-                                contentType,
-                                bodyText
-                            );
-
-                        })
-                        .catch(function(error) {
-
-                            reportResponse(
-                                "FETCH",
-                                method,
-                                url,
-                                response.status,
-                                contentType,
-                                "RESPONSE READ ERROR: "
-                                    + String(error)
-                            );
-
-                        });
-                }
-
-            } catch (e) {
-
-                reportResponse(
-                    "FETCH",
-                    method,
-                    url,
-                    response ? response.status : 0,
-                    "",
-                    "RESPONSE CLONE ERROR: "
-                        + String(e)
-                );
+            if (
+                    !url.contains(
+                            "api.encar.com"
+                    )
+            ) {
+                return;
             }
 
-            return response;
-        };
-    }
+
+            StringBuilder block =
+                    new StringBuilder();
 
 
-    /*
-     * ==========================
-     * XMLHttpRequest INTERCEPTOR
-     * ==========================
-     */
+            block.append(
+                    "------------------------------\n"
+            );
 
-    if (window.XMLHttpRequest) {
+            block.append(
+                    "SOURCE: "
+            );
 
-        const originalOpen =
-            XMLHttpRequest.prototype.open;
+            block.append(
+                    source
+            );
 
-        const originalSend =
-            XMLHttpRequest.prototype.send;
+            block.append(
+                    "\n"
+            );
 
 
-        XMLHttpRequest.prototype.open =
-            function(
-                method,
-                url
+            block.append(
+                    "METHOD: "
+            );
+
+            block.append(
+                    method
+            );
+
+            block.append(
+                    "\n"
+            );
+
+
+            block.append(
+                    "URL:\n"
+            );
+
+            block.append(
+                    url
+            );
+
+            block.append(
+                    "\n"
+            );
+
+
+            if (
+                    body != null &&
+                    !body.trim().isEmpty()
             ) {
 
-                try {
-
-                    this.__scannerMethod =
-                        method || "GET";
-
-                    this.__scannerUrl =
-                        url || "";
-
-                } catch (e) {
-                }
-
-                return originalOpen.apply(
-                    this,
-                    arguments
-                );
-            };
-
-
-        XMLHttpRequest.prototype.send =
-            function(body) {
-
-                const xhr = this;
-
-                const method =
-                    xhr.__scannerMethod || "GET";
-
-                const url =
-                    xhr.__scannerUrl || "";
-
-                reportRequest(
-                    "XHR",
-                    method,
-                    url,
-                    body
+                block.append(
+                        "BODY:\n"
                 );
 
-
-                if (
-                    url &&
-                    url.indexOf(TARGET_API) !== -1
-                ) {
-
-                    xhr.addEventListener(
-                        "loadend",
-                        function() {
-
-                            let responseBody = "";
-
-                            let contentType = "";
-
-                            try {
-
-                                contentType =
-                                    xhr.getResponseHeader(
-                                        "content-type"
-                                    ) || "";
-
-                            } catch (e) {
-                            }
-
-
-                            try {
-
-                                if (
-                                    xhr.responseType === ""
-                                    ||
-                                    xhr.responseType === "text"
-                                ) {
-
-                                    responseBody =
-                                        xhr.responseText || "";
-
-                                } else if (
-                                    xhr.responseType === "json"
-                                ) {
-
-                                    responseBody =
-                                        JSON.stringify(
-                                            xhr.response
-                                        );
-
-                                } else {
-
-                                    responseBody =
-                                        safeString(
-                                            xhr.response
-                                        );
-                                }
-
-                            } catch (e) {
-
-                                responseBody =
-                                    "XHR RESPONSE READ ERROR: "
-                                    + String(e);
-                            }
-
-
-                            reportResponse(
-                                "XHR",
-                                method,
-                                url,
-                                xhr.status,
-                                contentType,
-                                responseBody
-                            );
-                        }
-                    );
-                }
-
-
-                return originalSend.apply(
-                    this,
-                    arguments
+                block.append(
+                        body
                 );
-            };
-    }
 
-
-    console.log(
-        "ENCAR Network Scanner interceptor installed"
-    );
-
-})();
-""".trimIndent()
-
-        webView.evaluateJavascript(
-            javascript,
-            null
-        )
-    }
-
-    inner class NetworkBridge {
-
-        @JavascriptInterface
-        fun onRequest(
-            source: String,
-            method: String,
-            url: String,
-            body: String
-        ) {
-
-            if (!scanning) {
-                return
+                block.append(
+                        "\n"
+                );
             }
 
-            val cleanUrl = url.trim()
-
-            if (cleanUrl.isBlank()) {
-                return
-            }
-
-            val block = StringBuilder()
-
-            block.append("------------------------------\n")
-            block.append("SOURCE: ")
-            block.append(source)
-            block.append("\n")
-
-            block.append("METHOD: ")
-            block.append(method)
-            block.append("\n")
-
-            block.append("URL:\n")
-            block.append(cleanUrl)
-            block.append("\n")
-
-            if (body.isNotBlank()) {
-
-                block.append("BODY:\n")
-                block.append(body)
-                block.append("\n")
-            }
 
             appendLog(
-                block.toString()
-            )
+                    block.toString()
+            );
         }
 
 
         /*
-         * ТОВА Е НОВАТА ВАЖНА ЧАСТ.
+         * ======================================
          *
-         * Тук идва JSON response-а от:
+         * ТОВА Е RESPONSE BODY
          *
-         * api.encar.com/search/car/list/mobile
+         * ======================================
          */
+
         @JavascriptInterface
-        fun onResponse(
-            source: String,
-            method: String,
-            url: String,
-            status: Int,
-            contentType: String,
-            body: String
+        public void onResponse(
+                String source,
+                String method,
+                String url,
+                int status,
+                String contentType,
+                String body
         ) {
 
             if (!scanning) {
-                return
+                return;
             }
+
 
             if (
-                !url.contains(
-                    targetSearchApi,
-                    ignoreCase = true
-                )
+                    url == null ||
+                    !url.contains(
+                            TARGET_SEARCH_API
+                    )
             ) {
-                return
+                return;
             }
 
-            val block = StringBuilder()
 
-            block.append("\n")
-            block.append("====================================\n")
-            block.append("===== ENCAR SEARCH API RESPONSE =====\n")
-            block.append("====================================\n")
+            StringBuilder block =
+                    new StringBuilder();
 
-            block.append("SOURCE: ")
-            block.append(source)
-            block.append("\n")
-
-            block.append("METHOD: ")
-            block.append(method)
-            block.append("\n")
-
-            block.append("STATUS: ")
-            block.append(status)
-            block.append("\n")
-
-            block.append("CONTENT-TYPE: ")
-            block.append(contentType)
-            block.append("\n")
-
-            block.append("URL:\n")
-            block.append(url)
-            block.append("\n")
-
-            block.append("\nRESPONSE BODY:\n")
-            block.append(body)
-            block.append("\n")
 
             block.append(
-                "===== END ENCAR SEARCH API RESPONSE =====\n"
-            )
+                    "\n"
+            );
 
             block.append(
-                "=========================================\n"
-            )
+                    "========================================\n"
+            );
+
+            block.append(
+                    "===== ENCAR SEARCH API RESPONSE =====\n"
+            );
+
+            block.append(
+                    "========================================\n"
+            );
+
+
+            block.append(
+                    "SOURCE: "
+            );
+
+            block.append(
+                    source
+            );
+
+            block.append(
+                    "\n"
+            );
+
+
+            block.append(
+                    "METHOD: "
+            );
+
+            block.append(
+                    method
+            );
+
+            block.append(
+                    "\n"
+            );
+
+
+            block.append(
+                    "STATUS: "
+            );
+
+            block.append(
+                    status
+            );
+
+            block.append(
+                    "\n"
+            );
+
+
+            block.append(
+                    "CONTENT-TYPE: "
+            );
+
+            block.append(
+                    contentType
+            );
+
+            block.append(
+                    "\n"
+            );
+
+
+            block.append(
+                    "URL:\n"
+            );
+
+            block.append(
+                    url
+            );
+
+            block.append(
+                    "\n\n"
+            );
+
+
+            block.append(
+                    "RESPONSE BODY:\n"
+            );
+
+
+            if (body != null) {
+
+                block.append(
+                        body
+                );
+
+            } else {
+
+                block.append(
+                        "(empty)"
+                );
+            }
+
+
+            block.append(
+                    "\n"
+            );
+
+
+            block.append(
+                    "===== END ENCAR SEARCH API RESPONSE =====\n"
+            );
+
+            block.append(
+                    "========================================\n"
+            );
+
 
             appendLog(
-                block.toString()
-            )
+                    block.toString()
+            );
 
-            runOnUiThread {
 
-                statusText.text =
-                    "✅ ENCAR JSON RESPONSE CAPTURED"
+            runOnUiThread(
+                    () -> {
 
-                Toast.makeText(
-                    this@MainActivity,
-                    "ENCAR response captured!",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
+                        statusText.setText(
+                                "✅ ENCAR JSON CAPTURED"
+                        );
+
+
+                        Toast.makeText(
+                                MainActivity.this,
+                                "ENCAR JSON captured!",
+                                Toast.LENGTH_LONG
+                        ).show();
+                    }
+            );
         }
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
 
-        if (webView.canGoBack()) {
+    /*
+     * =========================================
+     * BACK
+     * =========================================
+     */
 
-            webView.goBack()
+    @Override
+    public void onBackPressed() {
+
+        if (
+                webView != null &&
+                webView.canGoBack()
+        ) {
+
+            webView.goBack();
 
         } else {
 
-            super.onBackPressed()
+            super.onBackPressed();
         }
     }
 
-    override fun onDestroy() {
+
+    /*
+     * =========================================
+     * DESTROY
+     * =========================================
+     */
+
+    @Override
+    protected void onDestroy() {
 
         try {
-            webView.removeJavascriptInterface(
-                "AndroidNetworkScanner"
-            )
 
-            webView.destroy()
+            if (
+                    webView != null
+            ) {
 
-        } catch (_: Exception) {
+                webView.removeJavascriptInterface(
+                        "AndroidNetworkScanner"
+                );
+
+                webView.destroy();
+            }
+
+        } catch (Exception ignored) {
         }
 
-        super.onDestroy()
+
+        super.onDestroy();
     }
 }
