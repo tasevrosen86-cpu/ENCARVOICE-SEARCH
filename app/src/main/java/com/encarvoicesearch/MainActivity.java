@@ -27,6 +27,7 @@ import org.json.JSONObject;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -34,6 +35,7 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity {
 
     private static final int VOICE_REQUEST = 1001;
+    private static final int MAX_READ_ATTEMPTS = 12;
 
     private WebView webView;
     private TextView status;
@@ -43,36 +45,131 @@ public class MainActivity extends Activity {
             new Handler(Looper.getMainLooper());
 
     private int readAttempts = 0;
-    private static final int MAX_READ_ATTEMPTS = 12;
 
     private String lastResult = "";
     private String lastCarUrl = "";
 
-    private static class CarSearchSpec {
+    private final List<CarModel> catalog =
+            new ArrayList<>();
 
-        String displayName;
-        String manufacturer;
-        String modelGroup;
+
+    // =========================================================
+    // MODEL CATALOG
+    // =========================================================
+
+    private static class Generation {
+
+        int fromYear;
+        int toYear;
+
         String exactModel;
+        String label;
 
-        CarSearchSpec(
-                String displayName,
-                String manufacturer,
-                String modelGroup,
-                String exactModel
+        Generation(
+                int fromYear,
+                int toYear,
+                String exactModel,
+                String label
         ) {
 
-            this.displayName = displayName;
-            this.manufacturer = manufacturer;
-            this.modelGroup = modelGroup;
+            this.fromYear = fromYear;
+            this.toYear = toYear;
             this.exactModel = exactModel;
+            this.label = label;
+        }
+
+        boolean accepts(int year) {
+
+            return year >= fromYear &&
+                    year <= toYear;
         }
     }
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
 
-        super.onCreate(savedInstanceState);
+    private static class CarModel {
+
+        String brand;
+        String displayName;
+
+        String manufacturer;
+        String modelGroup;
+
+        String[] aliases;
+
+        List<Generation> generations =
+                new ArrayList<>();
+
+        CarModel(
+                String brand,
+                String displayName,
+                String manufacturer,
+                String modelGroup,
+                String... aliases
+        ) {
+
+            this.brand = brand;
+            this.displayName = displayName;
+            this.manufacturer = manufacturer;
+            this.modelGroup = modelGroup;
+            this.aliases = aliases;
+        }
+
+        CarModel generation(
+                int from,
+                int to,
+                String exactModel,
+                String label
+        ) {
+
+            generations.add(
+                    new Generation(
+                            from,
+                            to,
+                            exactModel,
+                            label
+                    )
+            );
+
+            return this;
+        }
+
+        Generation generationFor(
+                int year
+        ) {
+
+            for (
+                    Generation generation :
+                            generations
+            ) {
+
+                if (
+                        generation.accepts(year)
+                ) {
+
+                    return generation;
+                }
+            }
+
+            return null;
+        }
+    }
+
+
+    // =========================================================
+    // ON CREATE
+    // =========================================================
+
+    @Override
+    protected void onCreate(
+            Bundle savedInstanceState
+    ) {
+
+        super.onCreate(
+                savedInstanceState
+        );
+
+        initCatalog();
+
 
         LinearLayout root =
                 new LinearLayout(this);
@@ -81,11 +178,12 @@ public class MainActivity extends Activity {
                 LinearLayout.VERTICAL
         );
 
+
         searchInput =
                 new EditText(this);
 
         searchInput.setHint(
-                "Kia Sorento 2025 дизел"
+                "Например: Hyundai Santa Fe 2024 хибрид"
         );
 
         searchInput.setTextSize(18);
@@ -101,6 +199,10 @@ public class MainActivity extends Activity {
                 15
         );
 
+
+        // =====================================================
+        // TOP BUTTONS
+        // =====================================================
 
         LinearLayout buttons =
                 new LinearLayout(this);
@@ -145,6 +247,10 @@ public class MainActivity extends Activity {
         );
 
 
+        // =====================================================
+        // STATUS
+        // =====================================================
+
         status =
                 new TextView(this);
 
@@ -161,8 +267,14 @@ public class MainActivity extends Activity {
                 15
         );
 
-        status.setTextIsSelectable(true);
+        status.setTextIsSelectable(
+                true
+        );
 
+
+        // =====================================================
+        // LOWER BUTTONS
+        // =====================================================
 
         LinearLayout tools =
                 new LinearLayout(this);
@@ -219,6 +331,10 @@ public class MainActivity extends Activity {
                 toolParams
         );
 
+
+        // =====================================================
+        // WEBVIEW
+        // =====================================================
 
         webView =
                 new WebView(this);
@@ -277,7 +393,8 @@ public class MainActivity extends Activity {
                         ) {
 
                             status.setText(
-                                    "Резултатите се зареждат..."
+                                    "Резултатите са заредени.\n" +
+                                    "Търся първата реална обява..."
                             );
 
                             handler.postDelayed(
@@ -290,41 +407,25 @@ public class MainActivity extends Activity {
         );
 
 
-        root.addView(
-                searchInput,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        );
-
+        // =====================================================
+        // ADD UI
+        // =====================================================
 
         root.addView(
-                buttons,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                searchInput
         );
-
 
         root.addView(
-                status,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                buttons
         );
-
 
         root.addView(
-                tools,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+                status
         );
 
+        root.addView(
+                tools
+        );
 
         root.addView(
                 webView,
@@ -336,8 +437,14 @@ public class MainActivity extends Activity {
         );
 
 
-        setContentView(root);
+        setContentView(
+                root
+        );
 
+
+        // =====================================================
+        // BUTTON EVENTS
+        // =====================================================
 
         voiceButton.setOnClickListener(
                 v -> startVoice()
@@ -364,6 +471,578 @@ public class MainActivity extends Activity {
         );
     }
 
+
+    // =========================================================
+    // CATALOG
+    // =========================================================
+
+    private void initCatalog() {
+
+        catalog.clear();
+
+
+        // =====================================================
+        // KIA
+        // =====================================================
+
+        CarModel sorento =
+                new CarModel(
+                        "KIA",
+                        "Kia Sorento",
+                        "기아",
+                        "쏘렌토",
+                        "kia sorento",
+                        "киа соренто",
+                        "кия соренто",
+                        "sorento",
+                        "соренто"
+                );
+
+
+        /*
+         * ПОТВЪРДЕН ПРОФИЛ
+         */
+        sorento.generation(
+                2023,
+                2099,
+                "더 뉴 쏘렌토 4세대",
+                "The New Sorento 4th"
+        );
+
+
+        /*
+         * За по-старите години:
+         * ModelGroup + Year.
+         */
+        sorento.generation(
+                2000,
+                2022,
+                null,
+                "Sorento"
+        );
+
+
+        catalog.add(
+                sorento
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia Sportage",
+                        "기아",
+                        "스포티지",
+                        "kia sportage",
+                        "киа спортидж",
+                        "киа спортиж",
+                        "sportage",
+                        "спортидж",
+                        "спортиж"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia Carnival",
+                        "기아",
+                        "카니발",
+                        "kia carnival",
+                        "киа карнивал",
+                        "carnival",
+                        "карнивал"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia Seltos",
+                        "기아",
+                        "셀토스",
+                        "kia seltos",
+                        "seltos",
+                        "селтос"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia Niro",
+                        "기아",
+                        "니로",
+                        "kia niro",
+                        "niro",
+                        "ниро"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia Mohave",
+                        "기아",
+                        "모하비",
+                        "kia mohave",
+                        "mohave",
+                        "мохаве"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia EV6",
+                        "기아",
+                        "EV6",
+                        "kia ev6",
+                        "ev6"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia EV9",
+                        "기아",
+                        "EV9",
+                        "kia ev9",
+                        "ev9"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia K5",
+                        "기아",
+                        "K5",
+                        "kia k5",
+                        "k5"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia K8",
+                        "기아",
+                        "K8",
+                        "kia k8",
+                        "k8"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "KIA",
+                        "Kia K9",
+                        "기아",
+                        "K9",
+                        "kia k9",
+                        "k9"
+                )
+        );
+
+
+        // =====================================================
+        // HYUNDAI PALISADE
+        // =====================================================
+
+        CarModel palisade =
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Palisade",
+                        "현대",
+                        "팰리세이드",
+                        "hyundai palisade",
+                        "хюндай палисейд",
+                        "хендай палисейд",
+                        "хундай палисейд",
+                        "palisade",
+                        "палисейд"
+                );
+
+
+        /*
+         * ПОТВЪРДЕН РАБОТЕЩ ПРОФИЛ
+         */
+        palisade.generation(
+                2025,
+                2099,
+                "팰리세이드 (LX3_)",
+                "Palisade LX3"
+        );
+
+
+        /*
+         * ПОТВЪРДЕН РАБОТЕЩ ПРОФИЛ
+         */
+        palisade.generation(
+                2022,
+                2024,
+                "더 뉴 팰리세이드",
+                "The New Palisade"
+        );
+
+
+        palisade.generation(
+                2018,
+                2021,
+                "팰리세이드",
+                "Palisade"
+        );
+
+
+        catalog.add(
+                palisade
+        );
+
+
+        // =====================================================
+        // HYUNDAI SANTA FE
+        // =====================================================
+
+        CarModel santaFe =
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Santa Fe",
+                        "현대",
+                        "싼타페",
+                        "hyundai santa fe",
+                        "hyundai santafe",
+                        "хюндай санта фе",
+                        "хендай санта фе",
+                        "santa fe",
+                        "santafe",
+                        "санта фе"
+                );
+
+
+        /*
+         * Диапазоните са от показания Encar каталог.
+         * exactModel нарочно остава null,
+         * докато не бъде потвърден от scanner.
+         */
+        santaFe.generation(
+                2023,
+                2099,
+                null,
+                "Santa Fe MX5"
+        );
+
+        santaFe.generation(
+                2020,
+                2022,
+                null,
+                "The New Santa Fe"
+        );
+
+        santaFe.generation(
+                2018,
+                2019,
+                null,
+                "Santa Fe TM"
+        );
+
+        santaFe.generation(
+                2015,
+                2017,
+                null,
+                "Santa Fe Prime"
+        );
+
+        santaFe.generation(
+                2012,
+                2014,
+                null,
+                "Santa Fe DM"
+        );
+
+
+        catalog.add(
+                santaFe
+        );
+
+
+        // =====================================================
+        // HYUNDAI TUCSON
+        // =====================================================
+
+        CarModel tucson =
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Tucson",
+                        "현대",
+                        "투싼",
+                        "hyundai tucson",
+                        "хюндай тусон",
+                        "хендай тусон",
+                        "tucson",
+                        "тусон"
+                );
+
+
+        tucson.generation(
+                2023,
+                2099,
+                null,
+                "The New Tucson NX4"
+        );
+
+        tucson.generation(
+                2020,
+                2022,
+                null,
+                "Tucson NX4"
+        );
+
+        tucson.generation(
+                2015,
+                2019,
+                null,
+                "All New Tucson"
+        );
+
+        tucson.generation(
+                2013,
+                2014,
+                null,
+                "New Tucson ix"
+        );
+
+
+        catalog.add(
+                tucson
+        );
+
+
+        // =====================================================
+        // HYUNDAI AVANTE
+        // =====================================================
+
+        CarModel avante =
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Avante",
+                        "현대",
+                        "아반떼",
+                        "hyundai avante",
+                        "hyundai elantra",
+                        "avante",
+                        "elantra",
+                        "авантe",
+                        "аванте",
+                        "елантра"
+                );
+
+
+        avante.generation(
+                2023,
+                2099,
+                null,
+                "The New Avante CN7"
+        );
+
+        avante.generation(
+                2020,
+                2022,
+                null,
+                "Avante CN7"
+        );
+
+        avante.generation(
+                2018,
+                2019,
+                null,
+                "The New Avante"
+        );
+
+        avante.generation(
+                2015,
+                2017,
+                null,
+                "Avante AD"
+        );
+
+
+        catalog.add(
+                avante
+        );
+
+
+        // =====================================================
+        // HYUNDAI SONATA
+        // =====================================================
+
+        CarModel sonata =
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Sonata",
+                        "현대",
+                        "쏘나타",
+                        "hyundai sonata",
+                        "хюндай соната",
+                        "sonata",
+                        "соната"
+                );
+
+
+        sonata.generation(
+                2023,
+                2099,
+                null,
+                "Sonata The Edge DN8"
+        );
+
+        sonata.generation(
+                2019,
+                2022,
+                null,
+                "Sonata DN8"
+        );
+
+        sonata.generation(
+                2017,
+                2018,
+                null,
+                "Sonata New Rise"
+        );
+
+        sonata.generation(
+                2014,
+                2016,
+                null,
+                "LF Sonata"
+        );
+
+
+        catalog.add(
+                sonata
+        );
+
+
+        // =====================================================
+        // HYUNDAI GRANDEUR
+        // =====================================================
+
+        CarModel grandeur =
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Grandeur",
+                        "현대",
+                        "그랜저",
+                        "hyundai grandeur",
+                        "grandeur",
+                        "грандер",
+                        "грандьор",
+                        "грандеур"
+                );
+
+
+        grandeur.generation(
+                2022,
+                2099,
+                null,
+                "Grandeur GN7"
+        );
+
+        grandeur.generation(
+                2019,
+                2021,
+                null,
+                "The New Grandeur IG"
+        );
+
+        grandeur.generation(
+                2016,
+                2018,
+                null,
+                "Grandeur IG"
+        );
+
+
+        catalog.add(
+                grandeur
+        );
+
+
+        // =====================================================
+        // OTHER HYUNDAI
+        // =====================================================
+
+        catalog.add(
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Kona",
+                        "현대",
+                        "코나",
+                        "hyundai kona",
+                        "kona",
+                        "кона"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Staria",
+                        "현대",
+                        "스타리아",
+                        "hyundai staria",
+                        "staria",
+                        "стария",
+                        "стария хюндай"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Ioniq 5",
+                        "현대",
+                        "아이오닉5",
+                        "hyundai ioniq 5",
+                        "ioniq 5",
+                        "ioniq5",
+                        "йоник 5",
+                        "ионик 5"
+                )
+        );
+
+
+        catalog.add(
+                new CarModel(
+                        "HYUNDAI",
+                        "Hyundai Ioniq 6",
+                        "현대",
+                        "아이오닉6",
+                        "hyundai ioniq 6",
+                        "ioniq 6",
+                        "ioniq6",
+                        "йоник 6",
+                        "ионик 6"
+                )
+        );
+    }
+
+
+    // =========================================================
+    // VOICE
+    // =========================================================
 
     private void startVoice() {
 
@@ -450,6 +1129,9 @@ public class MainActivity extends Activity {
                         results.get(0);
 
 
+                /*
+                 * 20 25 -> 2025
+                 */
                 text =
                         text.replaceAll(
                                 "\\b20\\s+(\\d{2})\\b",
@@ -471,6 +1153,10 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    // =========================================================
+    // SEARCH INPUT
+    // =========================================================
 
     private void searchFromInput() {
 
@@ -494,14 +1180,9 @@ public class MainActivity extends Activity {
 
 
         String text =
-                original
-                        .toLowerCase(
-                                Locale.ROOT
-                        )
-                        .replaceAll(
-                                "\\s+",
-                                " "
-                        );
+                normalize(
+                        original
+                );
 
 
         Integer year =
@@ -522,63 +1203,9 @@ public class MainActivity extends Activity {
         }
 
 
-        String fuelKorean;
-        String fuelName;
-
-
-        if (
-                text.contains("дизел")
-                        ||
-                text.contains("diesel")
-        ) {
-
-            fuelKorean =
-                    "디젤";
-
-            fuelName =
-                    "DIESEL";
-
-        } else if (
-                text.contains("хибрид")
-                        ||
-                text.contains("hybrid")
-        ) {
-
-            fuelKorean =
-                    "가솔린+전기";
-
-            fuelName =
-                    "HYBRID";
-
-        } else if (
-                text.contains("бензин")
-                        ||
-                text.contains("gasoline")
-                        ||
-                text.contains("petrol")
-        ) {
-
-            fuelKorean =
-                    "가솔린";
-
-            fuelName =
-                    "GASOLINE";
-
-        } else {
-
-            status.setText(
-                    "Не разпознах горивото.\n" +
-                    "Кажи дизел, бензин или хибрид."
-            );
-
-            return;
-        }
-
-
-        CarSearchSpec car =
-                detectCar(
-                        text,
-                        year
+        CarModel car =
+                findCar(
+                        text
                 );
 
 
@@ -587,173 +1214,94 @@ public class MainActivity extends Activity {
         ) {
 
             status.setText(
-                    "Засега разпознавам:\n" +
-                    "• Kia Sorento\n" +
-                    "• Hyundai Palisade"
+                    "Не разпознах модела.\n" +
+                    "Каталогът засега е Kia + Hyundai."
             );
 
             return;
         }
 
 
-        /*
-         * Новият Palisade LX3 няма дизел.
-         */
-        if (
-                car.displayName.contains("Palisade LX3")
-                        &&
-                fuelKorean.equals("디젤")
-        ) {
-
-            status.setText(
-                    "Palisade LX3 няма дизел.\n" +
-                    "За новия модел избери бензин или хибрид."
-            );
-
-            return;
-        }
+        String fuel =
+                findFuel(
+                        text
+                );
 
 
-        /*
-         * Старият Palisade няма хибрид.
-         */
-        if (
-                car.displayName.contains("Palisade old")
-                        &&
-                fuelKorean.equals("가솔린+전기")
-        ) {
-
-            status.setText(
-                    "Старият Palisade няма хибрид.\n" +
-                    "За тази година избери дизел или бензин."
-            );
-
-            return;
-        }
+        Generation generation =
+                car.generationFor(
+                        year
+                );
 
 
         searchCar(
                 car,
+                generation,
                 year,
-                fuelKorean,
-                fuelName
+                fuel
         );
     }
 
 
-    private CarSearchSpec detectCar(
-            String text,
-            int year
+    // =========================================================
+    // FIND CAR
+    // =========================================================
+
+    private CarModel findCar(
+            String text
     ) {
 
-        boolean kia =
-                text.contains("kia")
-                        ||
-                text.contains("киа")
-                        ||
-                text.contains("кия");
+        CarModel best =
+                null;
+
+        int longest =
+                0;
 
 
-        boolean sorento =
-                text.contains("sorento")
-                        ||
-                text.contains("соренто");
-
-
-        if (
-                kia
-                        &&
-                sorento
+        for (
+                CarModel car :
+                        catalog
         ) {
 
-            return new CarSearchSpec(
-                    "Kia Sorento",
-                    "기아",
-                    "쏘렌토",
-                    "더 뉴 쏘렌토 4세대"
-            );
+            for (
+                    String alias :
+                            car.aliases
+            ) {
+
+                String normalizedAlias =
+                        normalize(
+                                alias
+                        );
+
+
+                if (
+                        containsPhrase(
+                                text,
+                                normalizedAlias
+                        )
+                                &&
+                        normalizedAlias.length()
+                                >
+                        longest
+                ) {
+
+                    best =
+                            car;
+
+                    longest =
+                            normalizedAlias.length();
+                }
+            }
         }
 
 
-        boolean hyundai =
-                text.contains("hyundai")
-                        ||
-                text.contains("хюндай")
-                        ||
-                text.contains("хундай")
-                        ||
-                text.contains("хендай")
-                        ||
-                text.contains("хюнде");
-
-
-        boolean palisade =
-                text.contains("palisade")
-                        ||
-                text.contains("палисейд")
-                        ||
-                text.contains("палисад")
-                        ||
-                text.contains("палисейд");
-
-
-        if (
-                hyundai
-                        &&
-                palisade
-        ) {
-
-            /*
-             * 2025+:
-             * новото поколение LX3.
-             *
-             * Това е точният вътрешен Encar Model token.
-             */
-            if (
-                    year >= 2025
-            ) {
-
-                return new CarSearchSpec(
-                        "Hyundai Palisade LX3",
-                        "현대",
-                        "팰리세이드",
-                        "팰리세이드 (LX3_)"
-                );
-            }
-
-
-            /*
-             * 2022–2024:
-             * facelift старото поколение.
-             */
-            if (
-                    year >= 2022
-            ) {
-
-                return new CarSearchSpec(
-                        "Hyundai Palisade old",
-                        "현대",
-                        "팰리세이드",
-                        "더 뉴 팰리세이드"
-                );
-            }
-
-
-            /*
-             * По-старият Palisade.
-             */
-            return new CarSearchSpec(
-                    "Hyundai Palisade",
-                    "현대",
-                    "팰리세이드",
-                    "팰리세이드"
-            );
-        }
-
-
-        return null;
+        return best;
     }
 
+
+    // =========================================================
+    // YEAR
+    // =========================================================
 
     private Integer findYear(
             String text
@@ -766,7 +1314,7 @@ public class MainActivity extends Activity {
                 );
 
 
-        Matcher full =
+        Matcher matcher =
                 Pattern.compile(
                         "\\b(20\\d{2})\\b"
                 )
@@ -776,13 +1324,13 @@ public class MainActivity extends Activity {
 
 
         if (
-                full.find()
+                matcher.find()
         ) {
 
             try {
 
                 return Integer.parseInt(
-                        full.group(1)
+                        matcher.group(1)
                 );
 
             } catch (
@@ -792,9 +1340,12 @@ public class MainActivity extends Activity {
         }
 
 
-        Matcher shortYear =
+        /*
+         * "24 година" -> 2024
+         */
+        matcher =
                 Pattern.compile(
-                        "\\b(1[5-9]|2[0-6])\\s*(?:г|година|год)?\\b"
+                        "\\b(1[0-9]|2[0-9])\\s*(?:г|година|год)?\\b"
                 )
                         .matcher(
                                 text
@@ -802,7 +1353,7 @@ public class MainActivity extends Activity {
 
 
         if (
-                shortYear.find()
+                matcher.find()
         ) {
 
             try {
@@ -810,7 +1361,7 @@ public class MainActivity extends Activity {
                 return 2000
                         +
                         Integer.parseInt(
-                                shortYear.group(1)
+                                matcher.group(1)
                         );
 
             } catch (
@@ -824,16 +1375,84 @@ public class MainActivity extends Activity {
     }
 
 
+    // =========================================================
+    // FUEL
+    // =========================================================
+
+    private String findFuel(
+            String text
+    ) {
+
+        /*
+         * HYBRID FIRST
+         */
+        if (
+                text.contains("хибрид")
+                        ||
+                text.contains("hybrid")
+                        ||
+                text.contains("hev")
+        ) {
+
+            return "가솔린+전기";
+        }
+
+
+        if (
+                text.contains("електр")
+                        ||
+                text.contains("electric")
+                        ||
+                text.contains(" ev ")
+        ) {
+
+            return "전기";
+        }
+
+
+        if (
+                text.contains("дизел")
+                        ||
+                text.contains("diesel")
+        ) {
+
+            return "디젤";
+        }
+
+
+        if (
+                text.contains("бензин")
+                        ||
+                text.contains("gasoline")
+                        ||
+                text.contains("petrol")
+        ) {
+
+            return "가솔린";
+        }
+
+
+        /*
+         * Ако не е казано гориво:
+         * НЕ слагаме FuelType филтър.
+         */
+        return null;
+    }
+
+
+    // =========================================================
+    // WORKING ENCAR SEARCH
+    // =========================================================
+
     private void searchCar(
-            CarSearchSpec car,
+            CarModel car,
+            Generation generation,
             int year,
-            String fuel,
-            String fuelName
+            String fuel
     ) {
 
         int yearFrom =
                 year * 100;
-
 
         int yearTo =
                 yearFrom + 99;
@@ -843,25 +1462,25 @@ public class MainActivity extends Activity {
                 new StringBuilder();
 
 
+        /*
+         * Това е работещата архитектура.
+         * Не я сменяме.
+         */
         action.append(
                 "(And.Year.range("
         );
-
 
         action.append(
                 yearFrom
         );
 
-
         action.append(
                 ".."
         );
 
-
         action.append(
                 yearTo
         );
-
 
         action.append(
                 ")."
@@ -874,8 +1493,7 @@ public class MainActivity extends Activity {
 
 
         action.append(
-                "_." +
-                "(Or.Separation.F._.Separation.B.)"
+                "_.(Or.Separation.F._.Separation.B.)"
         );
 
 
@@ -919,19 +1537,30 @@ public class MainActivity extends Activity {
         );
 
 
-        action.append(
-                "_.Model."
-        );
+        /*
+         * Exact Model се използва САМО
+         * когато вече е потвърден.
+         */
+        if (
+                generation != null
+                        &&
+                generation.exactModel != null
+                        &&
+                !generation.exactModel.isEmpty()
+        ) {
 
+            action.append(
+                    "_.Model."
+            );
 
-        action.append(
-                car.exactModel
-        );
+            action.append(
+                    generation.exactModel
+            );
 
-
-        action.append(
-                "."
-        );
+            action.append(
+                    "."
+            );
+        }
 
 
         action.append(
@@ -949,19 +1578,27 @@ public class MainActivity extends Activity {
         );
 
 
-        action.append(
-                "_.FuelType."
-        );
+        /*
+         * Ако потребителят е казал гориво.
+         */
+        if (
+                fuel != null
+                        &&
+                !fuel.isEmpty()
+        ) {
 
+            action.append(
+                    "_.FuelType."
+            );
 
-        action.append(
-                fuel
-        );
+            action.append(
+                    fuel
+            );
 
-
-        action.append(
-                "."
-        );
+            action.append(
+                    "."
+            );
+        }
 
 
         action.append(
@@ -1008,6 +1645,31 @@ public class MainActivity extends Activity {
             lastCarUrl = "";
 
 
+            String generationText =
+                    "";
+
+
+            if (
+                    generation != null
+                            &&
+                    generation.label != null
+            ) {
+
+                generationText =
+                        "\nПоколение: "
+                                +
+                        generation.label;
+            }
+
+
+            String fuelText =
+                    fuel == null
+                            ?
+                    "всички горива"
+                            :
+                    fuel;
+
+
             status.setText(
                     "Търся "
                             +
@@ -1017,9 +1679,11 @@ public class MainActivity extends Activity {
                             +
                     year
                             +
-                    " "
+                    generationText
                             +
-                    fuelName
+                    "\nГориво: "
+                            +
+                    fuelText
                             +
                     "\nНАЙ-НИСКА ЦЕНА ПЪРВО"
             );
@@ -1043,15 +1707,13 @@ public class MainActivity extends Activity {
     }
 
 
+    // =========================================================
+    // READ FIRST CAR
+    // =========================================================
+
     private void startReading() {
 
         readAttempts = 0;
-
-
-        status.setText(
-                "Търся първата реална обява..."
-        );
-
 
         readFirstCar();
     }
@@ -1064,199 +1726,176 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){"
+
                         +
 
-                "var links=Array.from("
-                        +
-                "document.querySelectorAll("
-                        +
-                "'a[href*=\"/cars/detail/\"]'"
-                        +
-                ")"
-                        +
+                "var links=Array.from(" +
+                "document.querySelectorAll(" +
+                "'a[href*=\"/cars/detail/\"]'" +
+                ")" +
                 ");"
+
                         +
 
                 "var car=links.find(function(a){"
+
                         +
 
-                "var txt=(a.innerText||a.textContent||'')"
-                        +
-                ".replace(/\\\\s+/g,' ')"
-                        +
+                "var txt=(a.innerText||a.textContent||'')" +
+                ".replace(/\\\\s+/g,' ')" +
                 ".trim();"
+
                         +
 
                 "if(txt.length<15)return false;"
+
                         +
 
-                "if(a.classList.contains('sponsored_type'))"
-                        +
+                "if(a.classList.contains('sponsored_type'))" +
                 "return false;"
+
                         +
 
                 "var p=a.parentElement;"
+
                         +
 
                 "while(p){"
+
                         +
 
-                "if(p.classList&&"
-                        +
-                "p.classList.contains('sponsored_type'))"
-                        +
+                "if(p.classList&&" +
+                "p.classList.contains('sponsored_type'))" +
                 "return false;"
+
                         +
 
                 "p=p.parentElement;"
+
                         +
 
                 "}"
+
                         +
 
                 "return true;"
+
                         +
 
                 "});"
+
                         +
 
                 "if(!car){"
+
                         +
 
-                "AndroidCarReader.receiveCar("
-                        +
-                "JSON.stringify({"
-                        +
-                "error:'NO_CAR_FOUND'"
-                        +
-                "})"
-                        +
+                "AndroidCarReader.receiveCar(" +
+                "JSON.stringify({" +
+                "error:'NO_CAR_FOUND'" +
+                "})" +
                 ");"
+
                         +
 
                 "return;"
+
                         +
 
                 "}"
+
                         +
 
-                "var text="
-                        +
-                "(car.innerText||car.textContent||'')"
-                        +
-                ".replace(/\\\\s+/g,' ')"
-                        +
+                "var text=" +
+                "(car.innerText||car.textContent||'')" +
+                ".replace(/\\\\s+/g,' ')" +
                 ".trim();"
+
                         +
 
-                "var mileage="
-                        +
+                "var mileage=" +
                 "text.match(/([0-9][0-9,]*)\\\\s*km/i);"
+
                         +
 
-                "var krw="
-                        +
+                "var krw=" +
                 "text.match(/([0-9][0-9,]*)\\\\s*만원/);"
+
                         +
 
-                "var usd="
-                        +
+                "var usd=" +
                 "text.match(/([0-9][0-9,]*)\\\\s*USD/i);"
+
                         +
 
-                "var year1="
-                        +
-                "text.match(/([0-9]{2}\\\\/[0-9]{2}식"
-                        +
+                "var year1=" +
+                "text.match(/([0-9]{2}\\\\/[0-9]{2}식" +
                 "(?:\\\\([0-9]{2}년형\\\\))?)/);"
+
                         +
 
-                "var year2="
-                        +
+                "var year2=" +
                 "text.match(/((?:0[1-9]|1[0-2])\\\\/20[0-9]{2})/);"
+
                         +
 
-                "var fuel="
-                        +
-                "text.match(/"
-                        +
-                "(가솔린\\\\+전기|"
-                        +
-                "가솔린 하이브리드|"
-                        +
-                "디젤 하이브리드|"
-                        +
-                "디젤|"
-                        +
-                "가솔린|"
-                        +
-                "전기|"
-                        +
-                "수소|"
-                        +
-                "Diesel Hybrid|"
-                        +
-                "Gasoline Hybrid|"
-                        +
-                "Diesel|"
-                        +
-                "Gasoline|"
-                        +
-                "Electric|"
-                        +
-                "EV|"
-                        +
-                "Hydrogen|"
-                        +
-                "LPG)"
-                        +
+                "var fuel=" +
+                "text.match(/" +
+
+                "(가솔린\\\\+전기|" +
+                "가솔린 하이브리드|" +
+                "디젤 하이브리드|" +
+                "디젤|" +
+                "가솔린|" +
+                "전기|" +
+                "수소|" +
+                "Diesel Hybrid|" +
+                "Gasoline Hybrid|" +
+                "Diesel|" +
+                "Gasoline|" +
+                "Electric|" +
+                "EV|" +
+                "Hydrogen|" +
+                "LPG)" +
+
                 "/i);"
+
                         +
 
                 "var href=car.href||'';"
+
                         +
 
-                "var id="
-                        +
+                "var id=" +
                 "href.match(/\\/cars\\/detail\\/([0-9]+)/);"
+
                         +
 
-                "AndroidCarReader.receiveCar("
-                        +
+                "AndroidCarReader.receiveCar(" +
 
-                "JSON.stringify({"
-                        +
+                "JSON.stringify({" +
 
-                "text:text,"
-                        +
+                "text:text," +
 
-                "url:href,"
-                        +
+                "url:href," +
 
-                "carId:(id?id[1]:''),"
-                        +
+                "carId:(id?id[1]:'')," +
 
-                "mileage:(mileage?mileage[1]:''),"
-                        +
+                "mileage:(mileage?mileage[1]:'')," +
 
-                "year:(year1?year1[1]:"
-                        +
-                "(year2?year2[1]:'')),"
-                        +
+                "year:(year1?year1[1]:" +
+                "(year2?year2[1]:''))," +
 
-                "fuel:(fuel?fuel[1]:''),"
-                        +
+                "fuel:(fuel?fuel[1]:'')," +
 
-                "priceKrw:(krw?krw[1]:''),"
-                        +
+                "priceKrw:(krw?krw[1]:'')," +
 
-                "priceUsd:(usd?usd[1]:'')"
-                        +
+                "priceUsd:(usd?usd[1]:'')" +
 
-                "})"
-                        +
+                "})" +
 
                 ");"
+
                         +
 
                 "})();";
@@ -1268,6 +1907,10 @@ public class MainActivity extends Activity {
         );
     }
 
+
+    // =========================================================
+    // RECEIVE FIRST CAR
+    // =========================================================
 
     private class CarReader {
 
@@ -1318,11 +1961,8 @@ public class MainActivity extends Activity {
                                 } else {
 
                                     status.setText(
-                                            "Не намерих обява след "
-                                                    +
-                                            MAX_READ_ATTEMPTS
-                                                    +
-                                            " опита."
+                                            "Няма намерена реална обява.\n" +
+                                            "Ако Encar показва 0 коли, този модел/поколение ще го сканираме."
                                     );
                                 }
 
@@ -1413,6 +2053,7 @@ public class MainActivity extends Activity {
 
                             lastResult =
                                     "ПЪРВА ОБЯВА\n\n"
+
                                             +
 
                                     "ID: "
@@ -1420,6 +2061,7 @@ public class MainActivity extends Activity {
                                     carId
                                             +
                                     "\n"
+
                                             +
 
                                     "Година: "
@@ -1427,6 +2069,7 @@ public class MainActivity extends Activity {
                                     year
                                             +
                                     "\n"
+
                                             +
 
                                     "Пробег: "
@@ -1434,6 +2077,7 @@ public class MainActivity extends Activity {
                                     mileage
                                             +
                                     " km\n"
+
                                             +
 
                                     "Гориво: "
@@ -1441,6 +2085,7 @@ public class MainActivity extends Activity {
                                     fuel
                                             +
                                     "\n"
+
                                             +
 
                                     "Цена: "
@@ -1448,6 +2093,7 @@ public class MainActivity extends Activity {
                                     price
                                             +
                                     "\n\n"
+
                                             +
 
                                     "LINK:\n"
@@ -1455,6 +2101,7 @@ public class MainActivity extends Activity {
                                     url
                                             +
                                     "\n\n"
+
                                             +
 
                                     "RAW:\n"
@@ -1483,6 +2130,10 @@ public class MainActivity extends Activity {
     }
 
 
+    // =========================================================
+    // OPEN CAR
+    // =========================================================
+
     private void openFirstCar() {
 
         if (
@@ -1504,6 +2155,10 @@ public class MainActivity extends Activity {
         );
     }
 
+
+    // =========================================================
+    // COPY
+    // =========================================================
 
     private void copyResult() {
 
@@ -1550,6 +2205,77 @@ public class MainActivity extends Activity {
         );
     }
 
+
+    // =========================================================
+    // TEXT HELPERS
+    // =========================================================
+
+    private String normalize(
+            String text
+    ) {
+
+        if (
+                text == null
+        ) {
+
+            return "";
+        }
+
+
+        return text
+                .toLowerCase(
+                        Locale.ROOT
+                )
+                .replace(
+                        '-',
+                        ' '
+                )
+                .replace(
+                        ',',
+                        ' '
+                )
+                .replace(
+                        '.',
+                        ' '
+                )
+                .replaceAll(
+                        "\\s+",
+                        " "
+                )
+                .trim();
+    }
+
+
+    private boolean containsPhrase(
+            String text,
+            String phrase
+    ) {
+
+        String source =
+                " "
+                        +
+                text
+                        +
+                " ";
+
+
+        String target =
+                " "
+                        +
+                phrase
+                        +
+                " ";
+
+
+        return source.contains(
+                target
+        );
+    }
+
+
+    // =========================================================
+    // BACK
+    // =========================================================
 
     @Override
     public void onBackPressed() {
