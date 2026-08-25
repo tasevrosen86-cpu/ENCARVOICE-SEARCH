@@ -22,122 +22,139 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
 
-    private static final int VOICE_REQUEST = 7001;
+    private static final int VOICE_REQUEST = 1001;
 
-    private static final String ENCAR_BASE =
-            "https://m.encar.com/ca/search.do#!";
+    private static final String ENCAR_URL =
+            "https://m.encar.com/ca/search.do";
 
-    private EditText searchInput;
+    private EditText searchField;
     private TextView statusText;
     private WebView webView;
 
-    private final List<BrandRule> brands = new ArrayList<>();
-    private final List<ModelRule> models = new ArrayList<>();
+    private final Map<String, MakeInfo> makes =
+            new LinkedHashMap<>();
+
+    private final Map<String, ModelInfo> models =
+            new LinkedHashMap<>();
 
 
-    private static class BrandRule {
+    private static class MakeInfo {
 
-        final String key;
-        final String encar;
-        final String[] aliases;
+        String key;
+        String carType;
+        String encarName;
 
-        BrandRule(
+        MakeInfo(
                 String key,
-                String encar,
-                String... aliases
+                String carType,
+                String encarName
         ) {
+
             this.key = key;
-            this.encar = encar;
-            this.aliases = aliases;
+            this.carType = carType;
+            this.encarName = encarName;
         }
     }
 
 
-    private static class ModelRule {
+    private static class ModelInfo {
 
-        final String brandKey;
-        final String encar;
-        final String[] aliases;
+        String makeKey;
+        String modelGroup;
 
-        ModelRule(
-                String brandKey,
-                String encar,
-                String... aliases
+        ModelInfo(
+                String makeKey,
+                String modelGroup
         ) {
-            this.brandKey = brandKey;
-            this.encar = encar;
-            this.aliases = aliases;
+
+            this.makeKey = makeKey;
+            this.modelGroup = modelGroup;
         }
     }
 
 
-    private static class SearchSpec {
+    private static class SearchData {
 
-        String raw;
-
-        BrandRule brand;
+        MakeInfo make;
 
         String modelGroup;
+
+        String generation;
 
         String fuel;
 
         Integer yearFrom;
+
         Integer yearTo;
 
         Integer maxMileage;
-
-        Integer maxPriceManWon;
-
-        String sort = "MobileModifiedDate";
     }
 
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(
+            Bundle savedInstanceState
+    ) {
 
         super.onCreate(savedInstanceState);
 
-        initRules();
+        createCatalog();
 
         createUi();
+
 
         WebSettings settings =
                 webView.getSettings();
 
         settings.setJavaScriptEnabled(true);
+
         settings.setDomStorageEnabled(true);
+
         settings.setDatabaseEnabled(true);
+
         settings.setLoadsImagesAutomatically(true);
+
         settings.setUseWideViewPort(true);
+
         settings.setLoadWithOverviewMode(true);
 
-        CookieManager
-                .getInstance()
-                .setAcceptCookie(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(
+                true
+        );
 
-        CookieManager
-                .getInstance()
-                .setAcceptThirdPartyCookies(
-                        webView,
-                        true
-                );
+        settings.setMixedContentMode(
+                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        );
+
+
+        CookieManager cookieManager =
+                CookieManager.getInstance();
+
+        cookieManager.setAcceptCookie(true);
+
+        cookieManager.setAcceptThirdPartyCookies(
+                webView,
+                true
+        );
+
 
         webView.setWebViewClient(
                 new WebViewClient()
         );
 
+
         webView.loadUrl(
-                "https://m.encar.com/ca/search.do"
+                ENCAR_URL
         );
     }
 
@@ -155,6 +172,13 @@ public class MainActivity extends Activity {
                 Color.WHITE
         );
 
+        root.setPadding(
+                12,
+                12,
+                12,
+                0
+        );
+
 
         TextView title =
                 new TextView(this);
@@ -163,10 +187,8 @@ public class MainActivity extends Activity {
                 "ENCAR VOICE SEARCH"
         );
 
-        title.setTextSize(20f);
-
-        title.setTextColor(
-                Color.BLACK
+        title.setTextSize(
+                20f
         );
 
         title.setGravity(
@@ -174,38 +196,36 @@ public class MainActivity extends Activity {
         );
 
         title.setPadding(
-                16,
-                14,
-                16,
+                0,
+                8,
+                0,
                 8
         );
 
 
-        searchInput =
+        searchField =
                 new EditText(this);
 
-        searchInput.setHint(
-                "Напр.: Mercedes GLE 2024 diesel до 100 000 km най-евтини"
+        searchField.setHint(
+                "Mercedes GLE 2024 дизел 200000 км"
         );
 
-        searchInput.setTextSize(16f);
-
-        searchInput.setTextColor(
-                Color.BLACK
+        searchField.setTextSize(
+                17f
         );
 
-        searchInput.setHintTextColor(
-                Color.GRAY
+        searchField.setMinLines(
+                2
         );
 
-        searchInput.setMinLines(2);
+        searchField.setMaxLines(
+                3
+        );
 
-        searchInput.setMaxLines(4);
-
-        searchInput.setPadding(
-                20,
+        searchField.setPadding(
+                16,
                 12,
-                20,
+                16,
                 12
         );
 
@@ -222,11 +242,7 @@ public class MainActivity extends Activity {
                 new Button(this);
 
         voiceButton.setText(
-                "🎤 ГЛАС"
-        );
-
-        voiceButton.setOnClickListener(
-                v -> startVoiceInput()
+                "ГЛАС"
         );
 
 
@@ -234,11 +250,7 @@ public class MainActivity extends Activity {
                 new Button(this);
 
         searchButton.setText(
-                "🔎 ТЪРСИ"
-        );
-
-        searchButton.setOnClickListener(
-                v -> runSearch()
+                "ТЪРСИ"
         );
 
 
@@ -249,21 +261,8 @@ public class MainActivity extends Activity {
                 "ИЗЧИСТИ"
         );
 
-        clearButton.setOnClickListener(
-                v -> {
 
-                    searchInput.setText("");
-
-                    statusText.setText(
-                            "Готово за ново търсене"
-                    );
-
-                    searchInput.requestFocus();
-                }
-        );
-
-
-        LinearLayout.LayoutParams bp =
+        LinearLayout.LayoutParams buttonParams =
                 new LinearLayout.LayoutParams(
                         0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -273,17 +272,17 @@ public class MainActivity extends Activity {
 
         buttons.addView(
                 voiceButton,
-                bp
+                buttonParams
         );
 
         buttons.addView(
                 searchButton,
-                bp
+                buttonParams
         );
 
         buttons.addView(
                 clearButton,
-                bp
+                buttonParams
         );
 
 
@@ -291,24 +290,18 @@ public class MainActivity extends Activity {
                 new TextView(this);
 
         statusText.setText(
-                "Кажи или напиши марка, модел и филтри"
+                "Кажи или напиши колата."
         );
 
-        statusText.setTextSize(13f);
-
-        statusText.setTextColor(
-                Color.DKGRAY
+        statusText.setTextSize(
+                14f
         );
 
         statusText.setPadding(
-                16,
                 8,
-                16,
-                8
-        );
-
-        statusText.setTextIsSelectable(
-                true
+                8,
+                8,
+                10
         );
 
 
@@ -326,7 +319,7 @@ public class MainActivity extends Activity {
 
 
         root.addView(
-                searchInput,
+                searchField,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
@@ -362,11 +355,35 @@ public class MainActivity extends Activity {
         );
 
 
-        setContentView(root);
+        setContentView(
+                root
+        );
+
+
+        voiceButton.setOnClickListener(
+                v -> startVoice()
+        );
+
+
+        searchButton.setOnClickListener(
+                v -> search()
+        );
+
+
+        clearButton.setOnClickListener(
+                v -> {
+
+                    searchField.setText("");
+
+                    statusText.setText(
+                            "Полето е изчистено."
+                    );
+                }
+        );
     }
 
 
-    private void startVoiceInput() {
+    private void startVoice() {
 
         Intent intent =
                 new Intent(
@@ -388,7 +405,13 @@ public class MainActivity extends Activity {
 
         intent.putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
-                "Кажи марка, модел, година, гориво и пробег"
+                "Кажи марка, модел, година, гориво и километри"
+        );
+
+
+        intent.putExtra(
+                RecognizerIntent.EXTRA_MAX_RESULTS,
+                3
         );
 
 
@@ -405,7 +428,7 @@ public class MainActivity extends Activity {
 
             Toast.makeText(
                     this,
-                    "На телефона няма активна услуга за гласово разпознаване",
+                    "Няма активно гласово разпознаване.",
                     Toast.LENGTH_LONG
             ).show();
         }
@@ -413,7 +436,6 @@ public class MainActivity extends Activity {
 
 
     @Override
-    @SuppressWarnings("deprecation")
     protected void onActivityResult(
             int requestCode,
             int resultCode,
@@ -428,53 +450,65 @@ public class MainActivity extends Activity {
 
 
         if (
-                requestCode == VOICE_REQUEST
-                        &&
-                resultCode == RESULT_OK
-                        &&
-                data != null
+                requestCode != VOICE_REQUEST ||
+                resultCode != RESULT_OK ||
+                data == null
         ) {
 
-            ArrayList<String> results =
-                    data.getStringArrayListExtra(
-                            RecognizerIntent.EXTRA_RESULTS
-                    );
+            return;
+        }
 
 
-            if (
-                    results != null
-                            &&
-                    !results.isEmpty()
-            ) {
-
-                searchInput.setText(
-                        results.get(0)
+        ArrayList<String> results =
+                data.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_RESULTS
                 );
 
-                searchInput.setSelection(
-                        searchInput
-                                .getText()
-                                .length()
-                );
-            }
+
+        if (
+                results != null &&
+                !results.isEmpty()
+        ) {
+
+            String result =
+                    results.get(0);
+
+
+            searchField.setText(
+                    result
+            );
+
+
+            searchField.setSelection(
+                    searchField
+                            .getText()
+                            .length()
+            );
+
+
+            statusText.setText(
+                    "Можеш да поправиш текста и да натиснеш ТЪРСИ."
+            );
         }
     }
 
 
-    private void runSearch() {
+    private void search() {
 
-        String raw =
-                searchInput
+        String text =
+                searchField
                         .getText()
                         .toString()
                         .trim();
 
 
-        if (raw.isEmpty()) {
+        if (
+                text.isEmpty()
+        ) {
 
             Toast.makeText(
                     this,
-                    "Напиши или кажи каква кола търсиш",
+                    "Напиши или кажи кола.",
                     Toast.LENGTH_SHORT
             ).show();
 
@@ -485,131 +519,1013 @@ public class MainActivity extends Activity {
         hideKeyboard();
 
 
-        SearchSpec spec =
-                parseQuery(raw);
+        SearchData data =
+                parseSearch(
+                        text
+                );
+
+
+        if (
+                data.make == null
+        ) {
+
+            statusText.setText(
+                    "Не разпознах марката."
+            );
+
+            return;
+        }
 
 
         String action =
-                buildAction(spec);
+                buildAction(
+                        data
+                );
 
 
         String url =
-                buildEncarUrl(
-                        spec,
+                buildUrl(
                         action
                 );
 
 
-        statusText.setText(
-                buildStatus(spec)
+        StringBuilder result =
+                new StringBuilder();
+
+
+        result.append(
+                data.make.key
+                        .toUpperCase(
+                                Locale.ROOT
+                        )
         );
 
 
-        webView.loadUrl(url);
+        if (
+                data.modelGroup != null
+        ) {
+
+            result.append(
+                    " "
+            );
+
+            result.append(
+                    data.modelGroup
+            );
+        }
+
+
+        if (
+                data.yearFrom != null
+        ) {
+
+            result.append(
+                    " "
+            );
+
+            result.append(
+                    data.yearFrom
+            );
+
+
+            if (
+                    data.yearTo != null &&
+                    !data.yearFrom.equals(
+                            data.yearTo
+                    )
+            ) {
+
+                result.append(
+                        "-"
+                );
+
+                result.append(
+                        data.yearTo
+                );
+            }
+        }
+
+
+        if (
+                data.fuel != null
+        ) {
+
+            result.append(
+                    " "
+            );
+
+            result.append(
+                    fuelName(
+                            data.fuel
+                    )
+            );
+        }
+
+
+        if (
+                data.maxMileage != null
+        ) {
+
+            result.append(
+                    " до "
+            );
+
+            result.append(
+                    data.maxMileage
+            );
+
+            result.append(
+                    " км"
+            );
+        }
+
+
+        result.append(
+                " | най-ниска цена първо"
+        );
+
+
+        statusText.setText(
+                result.toString()
+        );
+
+
+        webView.loadUrl(
+                url
+        );
     }
 
 
-    private SearchSpec parseQuery(
-            String raw
+    private SearchData parseSearch(
+            String original
     ) {
 
-        SearchSpec spec =
-                new SearchSpec();
-
-        spec.raw = raw;
+        SearchData result =
+                new SearchData();
 
 
-        String n =
-                normalize(raw);
+        String text =
+                normalize(
+                        original
+                );
 
 
-        spec.brand =
-                findBrand(n);
+        result.make =
+                findMake(
+                        text
+                );
+
+
+        ModelInfo model =
+                findModel(
+                        text,
+                        result.make
+                );
 
 
         if (
-                spec.brand != null
+                model != null
         ) {
 
-            spec.modelGroup =
-                    resolveModelGroup(
-                            spec.brand.key,
-                            n,
-                            raw
+            if (
+                    result.make == null
+            ) {
+
+                result.make =
+                        findMakeByKey(
+                                model.makeKey
+                        );
+            }
+
+
+            result.modelGroup =
+                    model.modelGroup;
+        }
+
+
+        if (
+                result.make != null &&
+                result.modelGroup == null
+        ) {
+
+            result.modelGroup =
+                    deriveModel(
+                            text,
+                            result.make
                     );
         }
 
 
-        spec.fuel =
-                detectFuel(n);
+        parseYear(
+                text,
+                result
+        );
 
 
-        List<Integer> years =
-                extractYears(raw);
+        result.fuel =
+                parseFuel(
+                        text
+                );
+
+
+        result.maxMileage =
+                parseMileage(
+                        text
+                );
 
 
         if (
-                years.size() == 1
+                result.make != null &&
+                "mercedes".equals(
+                        result.make.key
+                ) &&
+                result.modelGroup != null
         ) {
 
-            spec.yearFrom =
-                    years.get(0);
+            Matcher generation =
+                    Pattern
+                            .compile(
+                                    "\\b(w\\d{3})\\b",
+                                    Pattern.CASE_INSENSITIVE
+                            )
+                            .matcher(
+                                    text
+                            );
 
-            spec.yearTo =
-                    years.get(0);
 
-        } else if (
-                years.size() >= 2
-        ) {
+            if (
+                    generation.find()
+            ) {
 
-            spec.yearFrom =
-                    Collections.min(
-                            years
-                    );
-
-            spec.yearTo =
-                    Collections.max(
-                            years
-                    );
+                result.generation =
+                        generation
+                                .group(1)
+                                .toUpperCase(
+                                        Locale.ROOT
+                                );
+            }
         }
 
 
-        spec.maxMileage =
-                extractMaxMileage(n);
+        return result;
+    }
 
 
-        spec.maxPriceManWon =
-                extractMaxPriceManWon(n);
+    private MakeInfo findMake(
+            String text
+    ) {
+
+        String bestAlias =
+                null;
+
+        MakeInfo result =
+                null;
+
+
+        for (
+                Map.Entry<String, MakeInfo> entry :
+                makes.entrySet()
+        ) {
+
+            String alias =
+                    entry.getKey();
+
+
+            if (
+                    contains(
+                            text,
+                            alias
+                    )
+            ) {
+
+                if (
+                        bestAlias == null ||
+                        alias.length() >
+                                bestAlias.length()
+                ) {
+
+                    bestAlias =
+                            alias;
+
+                    result =
+                            entry.getValue();
+                }
+            }
+        }
+
+
+        return result;
+    }
+
+
+    private MakeInfo findMakeByKey(
+            String key
+    ) {
+
+        for (
+                MakeInfo info :
+                makes.values()
+        ) {
+
+            if (
+                    info.key.equals(
+                            key
+                    )
+            ) {
+
+                return info;
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private ModelInfo findModel(
+            String text,
+            MakeInfo make
+    ) {
+
+        String bestAlias =
+                null;
+
+        ModelInfo result =
+                null;
+
+
+        for (
+                Map.Entry<String, ModelInfo> entry :
+                models.entrySet()
+        ) {
+
+            ModelInfo model =
+                    entry.getValue();
+
+
+            if (
+                    make != null &&
+                    !model.makeKey.equals(
+                            make.key
+                    )
+            ) {
+
+                continue;
+            }
+
+
+            String alias =
+                    entry.getKey();
+
+
+            if (
+                    contains(
+                            text,
+                            alias
+                    )
+            ) {
+
+                if (
+                        bestAlias == null ||
+                        alias.length() >
+                                bestAlias.length()
+                ) {
+
+                    bestAlias =
+                            alias;
+
+                    result =
+                            model;
+                }
+            }
+        }
 
 
         if (
-                containsAny(
-                        n,
-                        "най евтини",
-                        "най-евтини",
-                        "евтини първо",
-                        "lowest price",
-                        "price asc",
-                        "cheapest"
+                result != null
+        ) {
+
+            return result;
+        }
+
+
+        if (
+                make == null
+        ) {
+
+            for (
+                    Map.Entry<String, ModelInfo> entry :
+                    models.entrySet()
+            ) {
+
+                String alias =
+                        entry.getKey();
+
+
+                if (
+                        contains(
+                                text,
+                                alias
+                        )
+                ) {
+
+                    if (
+                            bestAlias == null ||
+                            alias.length() >
+                                    bestAlias.length()
+                    ) {
+
+                        bestAlias =
+                                alias;
+
+                        result =
+                                entry.getValue();
+                    }
+                }
+            }
+        }
+
+
+        return result;
+    }
+
+
+    private void parseYear(
+            String text,
+            SearchData result
+    ) {
+
+        Matcher range =
+                Pattern.compile(
+                        "\\b(19\\d{2}|20\\d{2})\\s*(?:-|до|to)\\s*(19\\d{2}|20\\d{2})\\b",
+                        Pattern.CASE_INSENSITIVE
+                ).matcher(
+                        text
+                );
+
+
+        if (
+                range.find()
+        ) {
+
+            int first =
+                    Integer.parseInt(
+                            range.group(1)
+                    );
+
+
+            int second =
+                    Integer.parseInt(
+                            range.group(2)
+                    );
+
+
+            result.yearFrom =
+                    Math.min(
+                            first,
+                            second
+                    );
+
+
+            result.yearTo =
+                    Math.max(
+                            first,
+                            second
+                    );
+
+
+            return;
+        }
+
+
+        Matcher exact =
+                Pattern.compile(
+                        "\\b(19\\d{2}|20\\d{2})\\b"
+                ).matcher(
+                        text
+                );
+
+
+        if (
+                exact.find()
+        ) {
+
+            int year =
+                    Integer.parseInt(
+                            exact.group(1)
+                    );
+
+
+            result.yearFrom =
+                    year;
+
+            result.yearTo =
+                    year;
+        }
+    }
+
+
+    private String parseFuel(
+            String text
+    ) {
+
+        if (
+                text.contains(
+                        "хибрид"
+                ) ||
+                text.contains(
+                        "hybrid"
                 )
         ) {
 
-            spec.sort =
-                    "MobilePriceAsc";
-
-        } else {
-
-            spec.sort =
-                    "MobileModifiedDate";
+            return "하이브리드";
         }
 
 
-        return spec;
+        if (
+                text.contains(
+                        "електр"
+                ) ||
+                contains(
+                        text,
+                        "electric"
+                ) ||
+                contains(
+                        text,
+                        "ev"
+                )
+        ) {
+
+            return "전기";
+        }
+
+
+        if (
+                text.contains(
+                        "дизел"
+                ) ||
+                text.contains(
+                        "diesel"
+                )
+        ) {
+
+            return "디젤";
+        }
+
+
+        if (
+                text.contains(
+                        "lpg"
+                ) ||
+                text.contains(
+                        "автогаз"
+                )
+        ) {
+
+            return "LPG";
+        }
+
+
+        if (
+                text.contains(
+                        "бензин"
+                ) ||
+                text.contains(
+                        "gasoline"
+                ) ||
+                text.contains(
+                        "petrol"
+                )
+        ) {
+
+            return "가솔린";
+        }
+
+
+        return null;
+    }
+
+
+    private Integer parseMileage(
+            String text
+    ) {
+
+        Matcher km =
+                Pattern.compile(
+                        "(\\d[\\d\\s.,]*|\\d+(?:[.,]\\d+)?\\s*[kк])\\s*(?:km|км|километра|километри)\\b",
+                        Pattern.CASE_INSENSITIVE
+                ).matcher(
+                        text
+                );
+
+
+        if (
+                km.find()
+        ) {
+
+            return parseDistance(
+                    km.group(1)
+            );
+        }
+
+
+        Matcher thousand =
+                Pattern.compile(
+                        "\\b(\\d+(?:[.,]\\d+)?)\\s*[kк]\\b",
+                        Pattern.CASE_INSENSITIVE
+                ).matcher(
+                        text
+                );
+
+
+        if (
+                thousand.find()
+        ) {
+
+            String value =
+                    thousand
+                            .group(1)
+                            .replace(
+                                    ",",
+                                    "."
+                            );
+
+
+            double number =
+                    Double.parseDouble(
+                            value
+                    );
+
+
+            return (int)
+                    Math.round(
+                            number * 1000.0
+                    );
+        }
+
+
+        return null;
+    }
+
+
+    private int parseDistance(
+            String value
+    ) {
+
+        String text =
+                value
+                        .toLowerCase(
+                                Locale.ROOT
+                        )
+                        .trim();
+
+
+        if (
+                text.endsWith(
+                        "k"
+                ) ||
+                text.endsWith(
+                        "к"
+                )
+        ) {
+
+            text =
+                    text.substring(
+                            0,
+                            text.length() - 1
+                    );
+
+
+            text =
+                    text
+                            .replace(
+                                    ",",
+                                    "."
+                            )
+                            .trim();
+
+
+            double number =
+                    Double.parseDouble(
+                            text
+                    );
+
+
+            return (int)
+                    Math.round(
+                            number * 1000.0
+                    );
+        }
+
+
+        text =
+                text
+                        .replace(
+                                " ",
+                                ""
+                        )
+                        .replace(
+                                ".",
+                                ""
+                        )
+                        .replace(
+                                ",",
+                                ""
+                        );
+
+
+        return Integer.parseInt(
+                text
+        );
+    }
+
+
+    private String deriveModel(
+            String text,
+            MakeInfo make
+    ) {
+
+        String work =
+                text;
+
+
+        for (
+                Map.Entry<String, MakeInfo> entry :
+                makes.entrySet()
+        ) {
+
+            if (
+                    entry.getValue()
+                            .key
+                            .equals(
+                                    make.key
+                            )
+            ) {
+
+                work =
+                        remove(
+                                work,
+                                entry.getKey()
+                        );
+            }
+        }
+
+
+        work =
+                work.replaceAll(
+                        "\\b(19\\d{2}|20\\d{2})\\b",
+                        " "
+                );
+
+
+        work =
+                work.replaceAll(
+                        "\\b\\d[\\d\\s.,]*\\s*(km|км|километра|километри)\\b",
+                        " "
+                );
+
+
+        String[] removeWords = {
+
+                "дизел",
+                "diesel",
+
+                "бензин",
+                "gasoline",
+                "petrol",
+
+                "хибрид",
+                "hybrid",
+
+                "електрически",
+                "електрическа",
+                "electric",
+                "ev",
+
+                "lpg",
+                "автогаз",
+
+                "до",
+                "под",
+                "under",
+                "maximum",
+                "max",
+
+                "година",
+                "год",
+                "year",
+
+                "модел",
+                "model",
+
+                "автоматик",
+                "automatic",
+
+                "awd",
+                "4x4",
+                "fwd",
+                "rwd",
+
+                "най евтини",
+                "най евтин",
+                "цена",
+                "price"
+        };
+
+
+        for (
+                String removeWord :
+                removeWords
+        ) {
+
+            work =
+                    remove(
+                            work,
+                            removeWord
+                    );
+        }
+
+
+        work =
+                work.replaceAll(
+                        "\\s+",
+                        " "
+                ).trim();
+
+
+        if (
+                work.isEmpty()
+        ) {
+
+            return null;
+        }
+
+
+        if (
+                "mercedes".equals(
+                        make.key
+                )
+        ) {
+
+            String upper =
+                    work.toUpperCase(
+                            Locale.ROOT
+                    );
+
+
+            String first =
+                    upper.split(
+                            " "
+                    )[0];
+
+
+            if (
+                    first.matches(
+                            "A|B|C|E|S|G|GLA|GLB|GLC|GLE|GLS|CLA|CLS|SL|SLC|SLK|V"
+                    )
+            ) {
+
+                return first +
+                        "-클래스";
+            }
+        }
+
+
+        if (
+                "volkswagen".equals(
+                        make.key
+                )
+        ) {
+
+            String model =
+                    normalize(
+                            work
+                    );
+
+
+            if (
+                    model.equals(
+                            "tiguan"
+                    )
+            ) {
+
+                return "티구안";
+            }
+
+
+            if (
+                    model.equals(
+                            "touareg"
+                    )
+            ) {
+
+                return "투아렉";
+            }
+
+
+            if (
+                    model.equals(
+                            "golf"
+                    )
+            ) {
+
+                return "골프";
+            }
+
+
+            if (
+                    model.equals(
+                            "passat"
+                    )
+            ) {
+
+                return "파사트";
+            }
+
+
+            if (
+                    model.equals(
+                            "arteon"
+                    )
+            ) {
+
+                return "아테온";
+            }
+        }
+
+
+        if (
+                "porsche".equals(
+                        make.key
+                )
+        ) {
+
+            String model =
+                    normalize(
+                            work
+                    );
+
+
+            if (
+                    model.equals(
+                            "cayenne"
+                    )
+            ) {
+
+                return "카이엔";
+            }
+
+
+            if (
+                    model.equals(
+                            "macan"
+                    )
+            ) {
+
+                return "마칸";
+            }
+
+
+            if (
+                    model.equals(
+                            "panamera"
+                    )
+            ) {
+
+                return "파나메라";
+            }
+
+
+            if (
+                    model.equals(
+                            "taycan"
+                    )
+            ) {
+
+                return "타이칸";
+            }
+        }
+
+
+        if (
+                work.matches(
+                        "(?i)[a-z0-9.\\- ]+"
+                )
+        ) {
+
+            return work
+                    .toUpperCase(
+                            Locale.ROOT
+                    );
+        }
+
+
+        return work;
     }
 
 
     private String buildAction(
-            SearchSpec spec
+            SearchData data
     ) {
 
         List<String> parts =
@@ -620,1249 +1536,214 @@ public class MainActivity extends Activity {
                 "Hidden.N."
         );
 
+
         parts.add(
                 "MultiViewHidden.N."
         );
 
+
+        // Само нормални продажби.
+        // Без лизинг и rental.
         parts.add(
                 "SellType.일반."
         );
 
 
         if (
-                spec.maxMileage != null
+                data.maxMileage != null
         ) {
 
             parts.add(
-                    "Mileage.range(.."
-                            +
-                    spec.maxMileage
-                            +
-                    ")."
+                    "Mileage.range(.." +
+                            data.maxMileage +
+                            ")."
             );
         }
 
 
         if (
-                spec.maxPriceManWon != null
+                data.yearFrom != null
         ) {
-
-            parts.add(
-                    "Price.range(.."
-                            +
-                    spec.maxPriceManWon
-                            +
-                    ")."
-            );
-        }
-
-
-        if (
-                spec.yearFrom != null
-                        &&
-                spec.yearTo != null
-        ) {
-
-            int from =
-                    spec.yearFrom * 100;
 
             int to =
-                    spec.yearTo * 100 + 99;
+                    data.yearTo != null
+                            ? data.yearTo
+                            : data.yearFrom;
+
+
+            String fromValue =
+                    String.format(
+                            Locale.US,
+                            "%04d00",
+                            data.yearFrom
+                    );
+
+
+            String toValue =
+                    String.format(
+                            Locale.US,
+                            "%04d99",
+                            to
+                    );
 
 
             parts.add(
-                    "Year.range("
-                            +
-                    from
-                            +
-                    ".."
-                            +
-                    to
-                            +
-                    ")."
+                    "Year.range(" +
+                            fromValue +
+                            ".." +
+                            toValue +
+                            ")."
             );
         }
 
 
         if (
-                spec.fuel != null
+                data.fuel != null
         ) {
 
             parts.add(
-                    "FuelType."
-                            +
-                    spec.fuel
-                            +
-                    "."
+                    "FuelType." +
+                            data.fuel +
+                            "."
             );
         }
 
 
         parts.add(
-                buildCarBranch(spec)
+                buildCarTree(
+                        data
+                )
         );
 
 
-        return "(And."
-                +
-                String.join(
-                        "_.",
-                        parts
-                )
-                +
-                ")";
-    }
+        StringBuilder action =
+                new StringBuilder(
+                        "(And."
+                );
 
 
-    private String buildCarBranch(
-            SearchSpec spec
-    ) {
-
-        if (
-                spec.brand == null
+        for (
+                int i = 0;
+                i < parts.size();
+                i++
         ) {
 
-            return "(C.CarType.A.)";
+            if (
+                    i > 0
+            ) {
+
+                action.append(
+                        "_."
+                );
+            }
+
+
+            action.append(
+                    parts.get(i)
+            );
         }
 
 
-        String manufacturer =
-                spec.brand.encar;
+        action.append(
+                ")"
+        );
+
+
+        return action.toString();
+    }
+
+
+    private String buildCarTree(
+            SearchData data
+    ) {
+
+        MakeInfo make =
+                data.make;
 
 
         if (
-                spec.modelGroup == null
-                        ||
-                spec.modelGroup
+                data.modelGroup == null ||
+                data.modelGroup
                         .trim()
                         .isEmpty()
         ) {
 
-            return "(C.CarType.A._.(C.Manufacturer."
-                    +
-                    manufacturer
-                    +
-                    ".))";
+            return "(C.CarType." +
+                    make.carType +
+                    "._.Manufacturer." +
+                    make.encarName +
+                    ".)";
         }
 
 
-        return "(C.CarType.A._.(C.Manufacturer."
-                +
-                manufacturer
-                +
-                "._.(C.ModelGroup."
-                +
-                spec.modelGroup
-                +
-                ".)))";
+        if (
+                data.generation != null &&
+                "mercedes".equals(
+                        make.key
+                )
+        ) {
+
+            String exactModel =
+                    data.modelGroup +
+                            " " +
+                            data.generation;
+
+
+            return "(C.CarType." +
+                    make.carType +
+                    "._.(C.Manufacturer." +
+                    make.encarName +
+                    "._.(C.ModelGroup." +
+                    data.modelGroup +
+                    "._.Model." +
+                    exactModel +
+                    ".)))";
+        }
+
+
+        return "(C.CarType." +
+                make.carType +
+                "._.(C.Manufacturer." +
+                make.encarName +
+                "._.ModelGroup." +
+                data.modelGroup +
+                ".))";
     }
 
 
-    private String buildEncarUrl(
-            SearchSpec spec,
+    private String buildUrl(
             String action
     ) {
 
         String json =
-                "{"
-                        +
-                "\"type\":\"car\","
-                        +
-                "\"action\":\""
-                        +
-                jsonEscape(action)
-                        +
-                "\","
-                        +
-                "\"title\":\""
-                        +
-                jsonEscape(spec.raw)
-                        +
-                "\","
-                        +
-                "\"toggle\":{},"
-                        +
-                "\"layer\":\"\","
-                        +
-                "\"sort\":\""
-                        +
-                jsonEscape(
-                        spec.sort
-                )
-                        +
-                "\""
-                        +
-                "}";
+                "{\"type\":\"car\"," +
+
+                "\"action\":\"" +
+                escapeJson(
+                        action
+                ) +
+                "\"," +
+
+                "\"toggle\":{}," +
+
+                "\"layer\":\"\"," +
+
+                "\"sort\":\"MobilePriceAsc\"}";
 
 
-        return ENCAR_BASE
-                +
-                Uri.encode(json);
-    }
-
-
-    private String buildStatus(
-            SearchSpec spec
-    ) {
-
-        StringBuilder s =
-                new StringBuilder();
-
-
-        if (
-                spec.brand != null
-        ) {
-
-            s.append("Марка: ")
-                    .append(
-                            spec.brand.encar
-                    );
-
-        } else {
-
-            s.append(
-                    "Марка: всички"
-            );
-        }
-
-
-        if (
-                spec.modelGroup != null
-        ) {
-
-            s.append(
-                    " | Модел: "
-            )
-                    .append(
-                            spec.modelGroup
-                    );
-        }
-
-
-        if (
-                spec.yearFrom != null
-        ) {
-
-            if (
-                    spec.yearFrom.equals(
-                            spec.yearTo
-                    )
-            ) {
-
-                s.append(
-                        " | Година: "
-                )
-                        .append(
-                                spec.yearFrom
-                        );
-
-            } else {
-
-                s.append(
-                        " | Години: "
-                )
-                        .append(
-                                spec.yearFrom
-                        )
-                        .append("-")
-                        .append(
-                                spec.yearTo
-                        );
-            }
-        }
-
-
-        if (
-                spec.fuel != null
-        ) {
-
-            s.append(
-                    " | Гориво: "
-            )
-                    .append(
-                            spec.fuel
-                    );
-        }
-
-
-        if (
-                spec.maxMileage != null
-        ) {
-
-            s.append(
-                    " | До "
-            )
-                    .append(
-                            spec.maxMileage
-                    )
-                    .append(
-                            " km"
-                    );
-        }
-
-
-        if (
-                spec.maxPriceManWon != null
-        ) {
-
-            s.append(
-                    " | Цена до "
-            )
-                    .append(
-                            spec.maxPriceManWon
-                                    * 10000L
-                    )
-                    .append(
-                            " KRW"
-                    );
-        }
-
-
-        s.append(
-                " | 일반 | "
-        )
-                .append(
-                        "MobilePriceAsc"
-                                .equals(
-                                        spec.sort
-                                )
-                                ?
-                                "цена ↑"
-                                :
-                                "последно обновени"
+        return ENCAR_URL +
+                "#!" +
+                Uri.encode(
+                        json
                 );
-
-
-        if (
-                spec.brand != null
-                        &&
-                spec.modelGroup == null
-        ) {
-
-            s.append(
-                    "\nМоделът не беше разпознат точно — търся по марка и останалите филтри."
-            );
-        }
-
-
-        return s.toString();
     }
 
 
-    private BrandRule findBrand(
-            String n
+    private String escapeJson(
+            String text
     ) {
 
-        for (
-                BrandRule b : brands
-        ) {
-
-            for (
-                    String alias : b.aliases
-            ) {
-
-                if (
-                        containsAlias(
-                                n,
-                                alias
-                        )
-                ) {
-
-                    return b;
-                }
-            }
-        }
-
-
-        return null;
-    }
-
-
-    private String resolveModelGroup(
-            String brandKey,
-            String normalized,
-            String raw
-    ) {
-
-        for (
-                ModelRule m : models
-        ) {
-
-            if (
-                    !m.brandKey
-                            .equals(
-                                    brandKey
-                            )
-            ) {
-
-                continue;
-            }
-
-
-            for (
-                    String alias : m.aliases
-            ) {
-
-                if (
-                        containsAlias(
-                                normalized,
-                                alias
-                        )
-                ) {
-
-                    return m.encar;
-                }
-            }
-        }
-
-
-        String special =
-                resolveSpecialModel(
-                        brandKey,
-                        normalized
-                );
-
-
-        if (
-                special != null
-        ) {
-
-            return special;
-        }
-
-
-        return guessModelGroup(
-                brandKey,
-                normalized,
-                raw
-        );
-    }
-
-
-    private String resolveSpecialModel(
-            String brandKey,
-            String n
-    ) {
-
-        if (
-                "mercedes"
-                        .equals(
-                                brandKey
-                        )
-        ) {
-
-            Matcher suv =
-                    Pattern.compile(
-                            "\\b(gl[abcse]|gle|glc|gls|gla|glb)\\s*\\d*[a-z]*\\b"
-                    )
-                            .matcher(n);
-
-
-            if (
-                    suv.find()
-            ) {
-
-                String x =
-                        suv.group(1)
-                                .toUpperCase(
-                                        Locale.ROOT
-                                );
-
-
-                return x
-                        +
-                        "-클래스";
-            }
-
-
-            Matcher classModel =
-                    Pattern.compile(
-                            "\\b([aces])\\s*\\d{3}[a-z]*\\b"
-                    )
-                            .matcher(n);
-
-
-            if (
-                    classModel.find()
-            ) {
-
-                return classModel
-                        .group(1)
-                        .toUpperCase(
-                                Locale.ROOT
-                        )
-                        +
-                        "-클래스";
-            }
-        }
-
-
-        if (
-                "bmw"
-                        .equals(
-                                brandKey
-                        )
-        ) {
-
-            Matcher series =
-                    Pattern.compile(
-                            "\\b([1-8])\\d{2}[a-z]{0,3}\\b"
-                    )
-                            .matcher(n);
-
-
-            if (
-                    series.find()
-            ) {
-
-                return series.group(1)
-                        +
-                        "시리즈";
-            }
-        }
-
-
-        return null;
-    }
-
-
-    private String guessModelGroup(
-            String brandKey,
-            String n,
-            String raw
-    ) {
-
-        String cleaned =
-                n;
-
-
-        BrandRule brand =
-                null;
-
-
-        for (
-                BrandRule b : brands
-        ) {
-
-            if (
-                    b.key.equals(
-                            brandKey
-                    )
-            ) {
-
-                brand = b;
-
-                break;
-            }
-        }
-
-
-        if (
-                brand != null
-        ) {
-
-            for (
-                    String alias : brand.aliases
-            ) {
-
-                cleaned =
-                        cleaned.replace(
-                                normalize(alias),
-                                " "
-                        );
-            }
-        }
-
-
-        cleaned =
-                cleaned.replaceAll(
-                        "\\b(19\\d{2}|20\\d{2})\\b",
-                        " "
-                );
-
-
-        cleaned =
-                cleaned.replaceAll(
-                        "\\b\\d[\\d\\s.,]*\\s*(km|км|километра|километри|kilometers?)\\b",
-                        " "
-                );
-
-
-        String[] noise = {
-
-                "diesel",
-                "дизел",
-                "디젤",
-
-                "petrol",
-                "gasoline",
-                "бензин",
-                "가솔린",
-
-                "hybrid",
-                "хибрид",
-                "하이브리드",
-
-                "electric",
-                "електрическа",
-                "електрически",
-                "전기",
-
-                "до",
-                "под",
-                "max",
-                "maximum",
-
-                "най евтини",
-                "най-евтини",
-                "cheapest",
-
-                "търси",
-                "търсене",
-                "кола",
-                "автомобил",
-
-                "година",
-                "години",
-                "пробег"
-        };
-
-
-        for (
-                String x : noise
-        ) {
-
-            cleaned =
-                    cleaned.replace(
-                            normalize(x),
-                            " "
-                    );
-        }
-
-
-        cleaned =
-                cleaned.replaceAll(
-                        "\\s+",
-                        " "
-                )
-                        .trim();
-
-
-        Matcher latin =
-                Pattern.compile(
-                        "\\b[A-Za-z][A-Za-z0-9+.-]{1,14}\\b"
-                )
-                        .matcher(raw);
-
-
-        while (
-                latin.find()
-        ) {
-
-            String token =
-                    latin.group();
-
-
-            if (
-                    token.equalsIgnoreCase(
-                            "km"
-                    )
-                            ||
-                    token.equalsIgnoreCase(
-                            "diesel"
-                    )
-                            ||
-                    token.equalsIgnoreCase(
-                            "petrol"
-                    )
-                            ||
-                    token.equalsIgnoreCase(
-                            "gasoline"
-                    )
-                            ||
-                    token.equalsIgnoreCase(
-                            "hybrid"
-                    )
-                            ||
-                    token.equalsIgnoreCase(
-                            "electric"
-                    )
-            ) {
-
-                continue;
-            }
-
-
-            boolean isBrandAlias =
-                    false;
-
-
-            if (
-                    brand != null
-            ) {
-
-                for (
-                        String a : brand.aliases
-                ) {
-
-                    if (
-                            token.equalsIgnoreCase(
-                                    a
-                            )
-                    ) {
-
-                        isBrandAlias =
-                                true;
-
-                        break;
-                    }
-                }
-            }
-
-
-            if (
-                    !isBrandAlias
-            ) {
-
-                return normalizeModelToken(
-                        brandKey,
-                        token
-                );
-            }
-        }
-
-
-        Matcher hangul =
-                Pattern.compile(
-                        "[가-힣][가-힣0-9\\- ]{1,20}"
-                )
-                        .matcher(
-                                cleaned
-                        );
-
-
-        if (
-                hangul.find()
-        ) {
-
-            return hangul.group()
-                    .trim();
-        }
-
-
-        return null;
-    }
-
-
-    private String normalizeModelToken(
-            String brandKey,
-            String token
-    ) {
-
-        String t =
-                token.trim();
-
-
-        if (
-                "mercedes"
-                        .equals(
-                                brandKey
-                        )
-        ) {
-
-            String u =
-                    t.toUpperCase(
-                            Locale.ROOT
-                    );
-
-
-            if (
-                    u.equals("GLE")
-                            ||
-                    u.equals("GLC")
-                            ||
-                    u.equals("GLS")
-                            ||
-                    u.equals("GLA")
-                            ||
-                    u.equals("GLB")
-                            ||
-                    u.equals("CLA")
-                            ||
-                    u.equals("CLS")
-                            ||
-                    u.equals("CLE")
-            ) {
-
-                return u
-                        +
-                        "-클래스";
-            }
-        }
-
-
-        return t.toUpperCase(
-                Locale.ROOT
-        );
-    }
-
-
-    private String detectFuel(
-            String n
-    ) {
-
-        if (
-                containsAny(
-                        n,
-                        "plug in",
-                        "plug-in",
-                        "плъгин",
-                        "phev"
-                )
-        ) {
-
-            return "가솔린+전기";
-        }
-
-
-        if (
-                containsAny(
-                        n,
-                        "diesel",
-                        "дизел",
-                        "дизелов",
-                        "디젤"
-                )
-        ) {
-
-            return "디젤";
-        }
-
-
-        if (
-                containsAny(
-                        n,
-                        "hybrid",
-                        "хибрид",
-                        "хибриден",
-                        "하이브리드"
-                )
-        ) {
-
-            return "하이브리드";
-        }
-
-
-        if (
-                containsAny(
-                        n,
-                        "electric",
-                        "електрическа",
-                        "електрически",
-                        "електромобил",
-                        "ev",
-                        "전기"
-                )
-        ) {
-
-            return "전기";
-        }
-
-
-        if (
-                containsAny(
-                        n,
-                        "petrol",
-                        "gasoline",
-                        "бензин",
-                        "бензинов",
-                        "가솔린"
-                )
-        ) {
-
-            return "가솔린";
-        }
-
-
-        if (
-                containsAny(
-                        n,
-                        "lpg",
-                        "газ"
-                )
-        ) {
-
-            return "LPG";
-        }
-
-
-        return null;
-    }
-
-
-    private List<Integer> extractYears(
-            String raw
-    ) {
-
-        ArrayList<Integer> out =
-                new ArrayList<>();
-
-
-        Matcher m =
-                Pattern.compile(
-                        "\\b(19\\d{2}|20\\d{2})\\b"
-                )
-                        .matcher(
-                                raw
-                        );
-
-
-        while (
-                m.find()
-        ) {
-
-            try {
-
-                int y =
-                        Integer.parseInt(
-                                m.group(1)
-                        );
-
-
-                if (
-                        y >= 1980
-                                &&
-                        y <= 2099
-                ) {
-
-                    out.add(y);
-                }
-
-            } catch (
-                    Exception ignored
-            ) {
-            }
-        }
-
-
-        return out;
-    }
-
-
-    private Integer extractMaxMileage(
-            String n
-    ) {
-
-        Matcher thousand =
-                Pattern.compile(
-                        "(\\d{1,3})\\s*(хиляди|хил|thousand)\\s*(km|км|километра|километри)?"
-                )
-                        .matcher(n);
-
-
-        if (
-                thousand.find()
-        ) {
-
-            try {
-
-                return Integer.parseInt(
-                        thousand.group(1)
-                )
-                        *
-                        1000;
-
-            } catch (
-                    Exception ignored
-            ) {
-            }
-        }
-
-
-        Matcher m =
-                Pattern.compile(
-                        "([0-9][0-9\\s.,]{0,10})\\s*(km|км|километра|километри|kilometers?)"
-                )
-                        .matcher(n);
-
-
-        if (
-                m.find()
-        ) {
-
-            Long x =
-                    parseHumanNumber(
-                            m.group(1)
-                    );
-
-
-            if (
-                    x != null
-                            &&
-                    x >= 0
-                            &&
-                    x <= 2000000
-            ) {
-
-                return x.intValue();
-            }
-        }
-
-
-        return null;
-    }
-
-
-    private Integer extractMaxPriceManWon(
-            String n
-    ) {
-
-        Matcher million =
-                Pattern.compile(
-                        "(?:до|под|max|under)?\\s*(\\d+(?:[.,]\\d+)?)\\s*(милиона|милион|million|m)\\s*(вона|вон|won|krw)"
-                )
-                        .matcher(n);
-
-
-        if (
-                million.find()
-        ) {
-
-            try {
-
-                double millions =
-                        Double.parseDouble(
-                                million.group(1)
-                                        .replace(
-                                                ",",
-                                                "."
-                                        )
-                        );
-
-
-                long krw =
-                        Math.round(
-                                millions
-                                        *
-                                1_000_000d
-                        );
-
-
-                return (int)
-                        Math.max(
-                                1,
-                                krw / 10000L
-                        );
-
-            } catch (
-                    Exception ignored
-            ) {
-            }
-        }
-
-
-        Matcher man =
-                Pattern.compile(
-                        "(\\d{2,6})\\s*만원"
-                )
-                        .matcher(n);
-
-
-        if (
-                man.find()
-        ) {
-
-            try {
-
-                return Integer.parseInt(
-                        man.group(1)
-                );
-
-            } catch (
-                    Exception ignored
-            ) {
-            }
-        }
-
-
-        return null;
-    }
-
-
-    private Long parseHumanNumber(
-            String value
-    ) {
-
-        if (
-                value == null
-        ) {
-
-            return null;
-        }
-
-
-        String s =
-                value.replaceAll(
-                        "[^0-9]",
-                        ""
-                );
-
-
-        if (
-                s.isEmpty()
-        ) {
-
-            return null;
-        }
-
-
-        try {
-
-            return Long.parseLong(s);
-
-        } catch (
-                Exception e
-        ) {
-
-            return null;
-        }
-    }
-
-
-    private boolean containsAny(
-            String text,
-            String... values
-    ) {
-
-        for (
-                String x : values
-        ) {
-
-            if (
-                    containsAlias(
-                            text,
-                            x
-                    )
-            ) {
-
-                return true;
-            }
-        }
-
-
-        return false;
-    }
-
-
-    private boolean containsAlias(
-            String normalizedText,
-            String alias
-    ) {
-
-        String a =
-                normalize(alias);
-
-
-        if (
-                a.isEmpty()
-        ) {
-
-            return false;
-        }
-
-
-        String padded =
-                " "
-                        +
-                normalizedText
-                        +
-                " ";
-
-
-        String target =
-                " "
-                        +
-                a
-                        +
-                " ";
-
-
-        if (
-                padded.contains(
-                        target
-                )
-        ) {
-
-            return true;
-        }
-
-
-        if (
-                a.contains("-")
-                        ||
-                a.contains(".")
-                        ||
-                a.contains("+")
-        ) {
-
-            return normalizedText
-                    .contains(a);
-        }
-
-
-        return false;
-    }
-
-
-    private String normalize(
-            String s
-    ) {
-
-        if (
-                s == null
-        ) {
-
-            return "";
-        }
-
-
-        return s
-                .toLowerCase(
-                        Locale.ROOT
-                )
-                .replace(
-                        '–',
-                        '-'
-                )
-                .replace(
-                        '—',
-                        '-'
-                )
-                .replaceAll(
-                        "[,:;!?()\\{}\"']",
-                        " "
-                )
-                .replaceAll(
-                        "\\s+",
-                        " "
-                )
-                .trim();
-    }
-
-
-    private String jsonEscape(
-            String s
-    ) {
-
-        if (
-                s == null
-        ) {
-
-            return "";
-        }
-
-
-        return s
+        return text
                 .replace(
                         "\\",
                         "\\\\"
@@ -1874,11 +1755,59 @@ public class MainActivity extends Activity {
     }
 
 
+    private String fuelName(
+            String fuel
+    ) {
+
+        if (
+                "디젤".equals(
+                        fuel
+                )
+        ) {
+
+            return "дизел";
+        }
+
+
+        if (
+                "가솔린".equals(
+                        fuel
+                )
+        ) {
+
+            return "бензин";
+        }
+
+
+        if (
+                "하이브리드".equals(
+                        fuel
+                )
+        ) {
+
+            return "хибрид";
+        }
+
+
+        if (
+                "전기".equals(
+                        fuel
+                )
+        ) {
+
+            return "електрически";
+        }
+
+
+        return fuel;
+    }
+
+
     private void hideKeyboard() {
 
         try {
 
-            InputMethodManager imm =
+            InputMethodManager manager =
                     (InputMethodManager)
                             getSystemService(
                                     Context.INPUT_METHOD_SERVICE
@@ -1886,11 +1815,11 @@ public class MainActivity extends Activity {
 
 
             if (
-                    getCurrentFocus()
-                            != null
+                    manager != null &&
+                    getCurrentFocus() != null
             ) {
 
-                imm.hideSoftInputFromWindow(
+                manager.hideSoftInputFromWindow(
                         getCurrentFocus()
                                 .getWindowToken(),
                         0
@@ -1904,382 +1833,1093 @@ public class MainActivity extends Activity {
     }
 
 
-    private void initRules() {
+    private boolean contains(
+            String text,
+            String phrase
+    ) {
 
-        brand(
-                "mercedes",
-                "벤츠",
-                "mercedes",
-                "mercedes-benz",
-                "benz",
-                "мерцедес",
-                "мерседес",
-                "мерцедес бенц",
-                "벤츠"
+        String first =
+                " " +
+                normalize(
+                        text
+                ) +
+                " ";
+
+
+        String second =
+                " " +
+                normalize(
+                        phrase
+                ) +
+                " ";
+
+
+        return first.contains(
+                second
         );
+    }
 
 
-        brand(
-                "bmw",
-                "BMW",
-                "bmw",
-                "бмв",
-                "бмв-то",
-                "би ем дабълю"
-        );
+    private String remove(
+            String text,
+            String phrase
+    ) {
+
+        String result =
+                " " +
+                normalize(
+                        text
+                ) +
+                " ";
 
 
-        brand(
-                "audi",
-                "아우디",
-                "audi",
-                "ауди",
-                "아우디"
-        );
+        result =
+                result.replace(
+                        " " +
+                                normalize(
+                                        phrase
+                                ) +
+                                " ",
+                        " "
+                );
 
 
-        brand(
-                "volkswagen",
-                "폭스바겐",
-                "volkswagen",
-                "vw",
-                "фолксваген",
-                "волксваген",
-                "폭스바겐"
-        );
+        return result
+                .replaceAll(
+                        "\\s+",
+                        " "
+                )
+                .trim();
+    }
 
 
-        brand(
-                "porsche",
-                "포르쉐",
-                "porsche",
-                "порше",
-                "포르쉐"
-        );
+    private String normalize(
+            String text
+    ) {
+
+        if (
+                text == null
+        ) {
+
+            return "";
+        }
 
 
-        brand(
+        return text
+                .toLowerCase(
+                        Locale.ROOT
+                )
+                .replace(
+                        '–',
+                        '-'
+                )
+                .replace(
+                        '—',
+                        '-'
+                )
+                .replace(
+                        '/',
+                        ' '
+                )
+                .replace(
+                        '_',
+                        ' '
+                )
+                .replaceAll(
+                        "[()\\{}:;!?\"']",
+                        " "
+                )
+                .replaceAll(
+                        "\\s+",
+                        " "
+                )
+                .trim();
+    }
+
+
+    private void createCatalog() {
+
+        /*
+         * KOREAN
+         */
+
+        addMake(
                 "hyundai",
+                "Y",
                 "현대",
                 "hyundai",
                 "хюндай",
-                "хундай",
                 "хендай",
-                "хюнде",
-                "현대"
+                "хундай"
         );
 
 
-        brand(
+        addMake(
                 "kia",
+                "Y",
                 "기아",
                 "kia",
-                "киа",
-                "кия",
-                "기아"
+                "киа"
         );
 
 
-        brand(
+        addMake(
                 "genesis",
+                "Y",
                 "제네시스",
                 "genesis",
-                "генезис",
                 "дженезис",
-                "제네시스"
+                "генезис"
         );
 
 
-        brand(
-                "peugeot",
-                "푸조",
-                "peugeot",
-                "пежо",
-                "푸조"
+        addMake(
+                "chevrolet",
+                "Y",
+                "쉐보레",
+                "chevrolet",
+                "chevy",
+                "шевролет"
         );
 
 
-        brand(
-                "ford",
-                "포드",
-                "ford",
-                "форд",
-                "포드"
+        addMake(
+                "renaultkorea",
+                "Y",
+                "르노코리아",
+                "renault korea",
+                "рено корея",
+                "renault samsung"
         );
 
 
-        brand(
-                "honda",
-                "혼다",
-                "honda",
-                "хонда",
-                "혼다"
+        addMake(
+                "kgm",
+                "Y",
+                "KG모빌리티",
+                "kgm",
+                "ssangyong",
+                "ssang yong",
+                "санг йонг",
+                "сангйонг"
         );
 
 
-        brand(
-                "toyota",
-                "토요타",
-                "toyota",
-                "тойота",
-                "тоёта",
-                "토요타"
+        /*
+         * IMPORT
+         */
+
+        addMake(
+                "mercedes",
+                "N",
+                "벤츠",
+                "mercedes benz",
+                "mercedes",
+                "benz",
+                "мерцедес бенц",
+                "мерцедес",
+                "бенц"
         );
 
 
-        brand(
-                "lexus",
-                "렉서스",
-                "lexus",
-                "лексус",
-                "렉서스"
+        addMake(
+                "bmw",
+                "N",
+                "BMW",
+                "bmw",
+                "бмв"
         );
 
 
-        brand(
+        addMake(
+                "audi",
+                "N",
+                "아우디",
+                "audi",
+                "ауди"
+        );
+
+
+        addMake(
+                "volkswagen",
+                "N",
+                "폭스바겐",
+                "volkswagen",
+                "vw",
+                "фолксваген"
+        );
+
+
+        addMake(
+                "porsche",
+                "N",
+                "포르쉐",
+                "porsche",
+                "порше"
+        );
+
+
+        addMake(
                 "volvo",
+                "N",
                 "볼보",
                 "volvo",
-                "волво",
-                "볼보"
+                "волво"
         );
 
 
-        brand(
-                "nissan",
-                "닛산",
-                "nissan",
-                "нисан",
-                "ниссан",
-                "닛산"
-        );
-
-
-        brand(
-                "infiniti",
-                "인피니티",
-                "infiniti",
-                "инфинити",
-                "인피니티"
-        );
-
-
-        brand(
-                "tesla",
-                "테슬라",
-                "tesla",
-                "тесла",
-                "테슬라"
-        );
-
-
-        brand(
-                "mini",
-                "미니",
-                "mini",
-                "мини",
-                "미니"
-        );
-
-
-        brand(
+        addMake(
                 "landrover",
+                "N",
                 "랜드로버",
                 "land rover",
-                "landrover",
-                "ленд ровър",
+                "range rover",
                 "ленд ровер",
-                "랜드로버"
+                "рейндж ровер"
         );
 
 
-        brand(
-                "jaguar",
-                "재규어",
-                "jaguar",
-                "ягуар",
-                "재규어"
+        addMake(
+                "lexus",
+                "N",
+                "렉서스",
+                "lexus",
+                "лексус"
         );
 
 
-        brand(
+        addMake(
+                "toyota",
+                "N",
+                "도요타",
+                "toyota",
+                "тойота"
+        );
+
+
+        addMake(
+                "honda",
+                "N",
+                "혼다",
+                "honda",
+                "хонда"
+        );
+
+
+        addMake(
+                "nissan",
+                "N",
+                "닛산",
+                "nissan",
+                "нисан"
+        );
+
+
+        addMake(
+                "infiniti",
+                "N",
+                "인피니티",
+                "infiniti",
+                "инфинити"
+        );
+
+
+        addMake(
+                "mazda",
+                "N",
+                "마쯔다",
+                "mazda",
+                "мазда"
+        );
+
+
+        addMake(
+                "mitsubishi",
+                "N",
+                "미쯔비시",
+                "mitsubishi",
+                "мицубиши"
+        );
+
+
+        addMake(
+                "subaru",
+                "N",
+                "스바루",
+                "subaru",
+                "субару"
+        );
+
+
+        addMake(
+                "suzuki",
+                "N",
+                "스즈키",
+                "suzuki",
+                "сузуки"
+        );
+
+
+        addMake(
+                "ford",
+                "N",
+                "포드",
+                "ford",
+                "форд"
+        );
+
+
+        addMake(
+                "lincoln",
+                "N",
+                "링컨",
+                "lincoln",
+                "линкълн"
+        );
+
+
+        addMake(
                 "jeep",
+                "N",
                 "지프",
                 "jeep",
                 "джип",
-                "지프"
+                "джийп"
         );
 
 
-        brand(
-                "renault",
-                "르노코리아(삼성)",
-                "renault",
-                "рено",
-                "르노"
+        addMake(
+                "cadillac",
+                "N",
+                "캐딜락",
+                "cadillac",
+                "кадилак"
         );
 
 
-        brand(
-                "chevrolet",
-                "쉐보레(GM대우)",
-                "chevrolet",
-                "chevy",
-                "шевролет",
-                "쉐보레"
+        addMake(
+                "tesla",
+                "N",
+                "테슬라",
+                "tesla",
+                "тесла"
         );
 
 
-        brand(
-                "kgm",
-                "KG모빌리티(쌍용)",
-                "kg mobility",
-                "kgm",
-                "ssangyong",
-                "санг йонг",
-                "сангйонг",
-                "쌍용",
-                "kg모빌리티"
+        addMake(
+                "mini",
+                "N",
+                "미니",
+                "mini",
+                "мини"
         );
 
 
-        brand(
+        addMake(
+                "peugeot",
+                "N",
+                "푸조",
+                "peugeot",
+                "пежо"
+        );
+
+
+        addMake(
                 "citroen",
+                "N",
                 "시트로엥",
                 "citroen",
                 "citroën",
-                "ситроен",
-                "시트로엥"
+                "ситроен"
         );
 
 
-        brand(
-                "mazda",
-                "마쯔다",
-                "mazda",
-                "мазда",
-                "마쯔다"
+        addMake(
+                "renault",
+                "N",
+                "르노",
+                "renault",
+                "reno",
+                "рено"
         );
 
 
-        brand(
-                "subaru",
-                "스바루",
-                "subaru",
-                "субару",
-                "스바루"
+        addMake(
+                "jaguar",
+                "N",
+                "재규어",
+                "jaguar",
+                "ягуар"
         );
 
 
-        brand(
-                "mitsubishi",
-                "미쓰비시",
-                "mitsubishi",
-                "мицубиши",
-                "미쓰비시"
-        );
-
-
-        brand(
-                "suzuki",
-                "스즈키",
-                "suzuki",
-                "сузуки",
-                "스즈키"
-        );
-
-
-        brand(
-                "fiat",
-                "피아트",
-                "fiat",
-                "фиат",
-                "피아트"
-        );
-
-
-        brand(
-                "alfaromeo",
-                "알파로메오",
-                "alfa romeo",
-                "алфа ромео",
-                "알파로메오"
-        );
-
-
-        brand(
+        addMake(
                 "maserati",
+                "N",
                 "마세라티",
                 "maserati",
-                "мазерати",
-                "마세라티"
+                "мазерати"
         );
 
 
-        brand(
+        addMake(
+                "ferrari",
+                "N",
+                "페라리",
+                "ferrari",
+                "ферари"
+        );
+
+
+        addMake(
+                "lamborghini",
+                "N",
+                "람보르기니",
+                "lamborghini",
+                "ламборгини"
+        );
+
+
+        addMake(
                 "bentley",
+                "N",
                 "벤틀리",
                 "bentley",
-                "бентли",
-                "벤틀리"
+                "бентли"
         );
 
 
-        brand(
+        addMake(
                 "rollsroyce",
+                "N",
                 "롤스로이스",
                 "rolls royce",
                 "rolls-royce",
-                "ролс ройс",
-                "롤스로이스"
+                "ролс ройс"
         );
 
 
-        brand(
-                "ferrari",
-                "페라리",
-                "ferrari",
-                "ферари",
-                "페라리"
-        );
-
-
-        brand(
-                "lamborghini",
-                "람보르기니",
-                "lamborghini",
-                "ламборгини",
-                "람보르기니"
-        );
-
-
-        brand(
-                "mclaren",
-                "맥라렌",
-                "mclaren",
-                "макларън",
-                "макларен",
-                "맥라렌"
-        );
-
-
-        brand(
+        addMake(
                 "astonmartin",
+                "N",
                 "애스턴마틴",
                 "aston martin",
-                "астън мартин",
-                "애스턴마틴"
+                "астън мартин"
         );
 
 
-        brand(
-                "cadillac",
-                "캐딜락",
-                "cadillac",
-                "кадилак",
-                "캐딜락"
+        addMake(
+                "mclaren",
+                "N",
+                "맥라렌",
+                "mclaren",
+                "макларън"
         );
 
 
-        brand(
-                "
+        addMake(
+                "fiat",
+                "N",
+                "피아트",
+                "fiat",
+                "фиат"
+        );
+
+
+        addMake(
+                "alfaromeo",
+                "N",
+                "알파로메오",
+                "alfa romeo",
+                "алфа ромео"
+        );
+
+
+        addMake(
+                "smart",
+                "N",
+                "스마트",
+                "smart",
+                "смарт"
+        );
+
+
+        addMake(
+                "polestar",
+                "N",
+                "폴스타",
+                "polestar",
+                "полстар"
+        );
+
+
+        /*
+         * HYUNDAI
+         */
+
+        addModel(
+                "hyundai",
+                "아반떼",
+                "avante",
+                "elantra",
+                "елантра"
+        );
+
+        addModel(
+                "hyundai",
+                "쏘나타",
+                "sonata",
+                "соната"
+        );
+
+        addModel(
+                "hyundai",
+                "그랜저",
+                "grandeur"
+        );
+
+        addModel(
+                "hyundai",
+                "코나",
+                "kona",
+                "кона"
+        );
+
+        addModel(
+                "hyundai",
+                "투싼",
+                "tucson",
+                "туксон"
+        );
+
+        addModel(
+                "hyundai",
+                "싼타페",
+                "santa fe",
+                "santafe",
+                "санта фе"
+        );
+
+        addModel(
+                "hyundai",
+                "팰리세이드",
+                "palisade",
+                "палисейд"
+        );
+
+        addModel(
+                "hyundai",
+                "아이오닉5",
+                "ioniq 5",
+                "ioniq5"
+        );
+
+        addModel(
+                "hyundai",
+                "아이오닉6",
+                "ioniq 6",
+                "ioniq6"
+        );
+
+        addModel(
+                "hyundai",
+                "스타리아",
+                "staria"
+        );
+
+
+        /*
+         * KIA
+         */
+
+        addModel(
+                "kia",
+                "K3",
+                "k3"
+        );
+
+        addModel(
+                "kia",
+                "K5",
+                "k5",
+                "optima",
+                "оптима"
+        );
+
+        addModel(
+                "kia",
+                "K7",
+                "k7"
+        );
+
+        addModel(
+                "kia",
+                "K8",
+                "k8"
+        );
+
+        addModel(
+                "kia",
+                "K9",
+                "k9"
+        );
+
+        addModel(
+                "kia",
+                "스팅어",
+                "stinger",
+                "стингер"
+        );
+
+        addModel(
+                "kia",
+                "니로",
+                "niro",
+                "ниро"
+        );
+
+        addModel(
+                "kia",
+                "셀토스",
+                "seltos",
+                "селтос"
+        );
+
+        addModel(
+                "kia",
+                "스포티지",
+                "sportage",
+                "спортидж"
+        );
+
+        addModel(
+                "kia",
+                "쏘렌토",
+                "sorento",
+                "соренто"
+        );
+
+        addModel(
+                "kia",
+                "모하비",
+                "mohave"
+        );
+
+        addModel(
+                "kia",
+                "카니발",
+                "carnival",
+                "карнивал"
+        );
+
+        addModel(
+                "kia",
+                "EV6",
+                "ev6"
+        );
+
+        addModel(
+                "kia",
+                "EV9",
+                "ev9"
+        );
+
+
+        /*
+         * GENESIS
+         */
+
+        addModel(
+                "genesis",
+                "G70",
+                "g70"
+        );
+
+        addModel(
+                "genesis",
+                "G80",
+                "g80"
+        );
+
+        addModel(
+                "genesis",
+                "G90",
+                "g90"
+        );
+
+        addModel(
+                "genesis",
+                "GV60",
+                "gv60"
+        );
+
+        addModel(
+                "genesis",
+                "GV70",
+                "gv70"
+        );
+
+        addModel(
+                "genesis",
+                "GV80",
+                "gv80"
+        );
+
+
+        /*
+         * MERCEDES
+         */
+
+        addModel(
+                "mercedes",
+                "A-클래스",
+                "a class",
+                "a-class"
+        );
+
+        addModel(
+                "mercedes",
+                "C-클래스",
+                "c class",
+                "c-class"
+        );
+
+        addModel(
+                "mercedes",
+                "E-클래스",
+                "e class",
+                "e-class"
+        );
+
+        addModel(
+                "mercedes",
+                "S-클래스",
+                "s class",
+                "s-class"
+        );
+
+        addModel(
+                "mercedes",
+                "CLA-클래스",
+                "cla"
+        );
+
+        addModel(
+                "mercedes",
+                "CLS-클래스",
+                "cls"
+        );
+
+        addModel(
+                "mercedes",
+                "GLA-클래스",
+                "gla"
+        );
+
+        addModel(
+                "mercedes",
+                "GLB-클래스",
+                "glb"
+        );
+
+        addModel(
+                "mercedes",
+                "GLC-클래스",
+                "glc"
+        );
+
+        addModel(
+                "mercedes",
+                "GLE-클래스",
+                "gle"
+        );
+
+        addModel(
+                "mercedes",
+                "GLS-클래스",
+                "gls"
+        );
+
+        addModel(
+                "mercedes",
+                "G-클래스",
+                "g class",
+                "g-class"
+        );
+
+
+        /*
+         * BMW
+         */
+
+        addModel(
+                "bmw",
+                "1시리즈",
+                "1 series"
+        );
+
+        addModel(
+                "bmw",
+                "3시리즈",
+                "3 series"
+        );
+
+        addModel(
+                "bmw",
+                "5시리즈",
+                "5 series"
+        );
+
+        addModel(
+                "bmw",
+                "7시리즈",
+                "7 series"
+        );
+
+        addModel(
+                "bmw",
+                "X1",
+                "x1"
+        );
+
+        addModel(
+                "bmw",
+                "X3",
+                "x3"
+        );
+
+        addModel(
+                "bmw",
+                "X4",
+                "x4"
+        );
+
+        addModel(
+                "bmw",
+                "X5",
+                "x5"
+        );
+
+        addModel(
+                "bmw",
+                "X6",
+                "x6"
+        );
+
+        addModel(
+                "bmw",
+                "X7",
+                "x7"
+        );
+
+        addModel(
+                "bmw",
+                "iX",
+                "ix"
+        );
+
+
+        /*
+         * VOLKSWAGEN
+         */
+
+        addModel(
+                "volkswagen",
+                "골프",
+                "golf",
+                "голф"
+        );
+
+        addModel(
+                "volkswagen",
+                "파사트",
+                "passat",
+                "пасат"
+        );
+
+        addModel(
+                "volkswagen",
+                "티구안",
+                "tiguan",
+                "тигуан"
+        );
+
+        addModel(
+                "volkswagen",
+                "투아렉",
+                "touareg",
+                "туарег"
+        );
+
+        addModel(
+                "volkswagen",
+                "아테온",
+                "arteon",
+                "артеон"
+        );
+
+        addModel(
+                "volkswagen",
+                "ID.4",
+                "id4",
+                "id.4"
+        );
+
+        addModel(
+                "volkswagen",
+                "ID.5",
+                "id5",
+                "id.5"
+        );
+
+
+        /*
+         * PORSCHE
+         */
+
+        addModel(
+                "porsche",
+                "911",
+                "911"
+        );
+
+        addModel(
+                "porsche",
+                "카이엔",
+                "cayenne",
+                "кайен"
+        );
+
+        addModel(
+                "porsche",
+                "마칸",
+                "macan",
+                "макан"
+        );
+
+        addModel(
+                "porsche",
+                "파나메라",
+                "panamera",
+                "панамера"
+        );
+
+        addModel(
+                "porsche",
+                "타이칸",
+                "taycan",
+                "тайкан"
+        );
+
+        addModel(
+                "porsche",
+                "718",
+                "718"
+        );
+
+
+        /*
+         * HONDA
+         */
+
+        addModel(
+                "honda",
+                "어코드",
+                "accord",
+                "акорд"
+        );
+
+        addModel(
+                "honda",
+                "CR-V",
+                "cr-v",
+                "crv",
+                "cr v"
+        );
+
+        addModel(
+                "honda",
+                "HR-V",
+                "hr-v",
+                "hrv",
+                "hr v"
+        );
+
+        addModel(
+                "honda",
+                "시빅",
+                "civic",
+                "сивик"
+        );
+
+        addModel(
+                "honda",
+                "오딧세이",
+                "odyssey",
+                "одисей"
+        );
+
+        addModel(
+                "honda",
+                "파일럿",
+                "pilot",
+                "пилот"
+        );
+
+
+        /*
+         * FORD
+         */
+
+        addModel(
+                "ford",
+                "익스플로러",
+                "explorer",
+                "експлорър"
+        );
+
+        addModel(
+                "ford",
+                "머스탱",
+                "mustang",
+                "мустанг"
+        );
+
+        addModel(
+                "ford",
+                "레인저",
+                "ranger",
+                "рейнджър"
+        );
+
+        addModel(
+                "ford",
+                "브롱코",
+                "bronco",
+                "бронко"
+        );
+
+        addModel(
+                "ford",
+                "F150",
+                "f150",
+                "f-150"
+        );
+
+
+        /*
+         * TESLA
+         */
+
+        addModel(
+                "tesla",
+                "모델 3",
+                "model 3",
+                "модел 3"
+        );
+
+        addModel(
+                "tesla",
+                "모델 Y",
+                "model y",
+                "мод
