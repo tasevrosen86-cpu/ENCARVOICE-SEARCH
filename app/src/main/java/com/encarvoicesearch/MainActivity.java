@@ -1,97 +1,116 @@
 package com.encarvoicesearch;
 
 import android.app.Activity;
-import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.speech.RecognizerIntent;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import java.util.ArrayList;
-import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 public class MainActivity extends Activity {
 
     private WebView webView;
-    private EditText searchInput;
     private TextView status;
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
 
-    private static final int SPEECH_REQUEST_CODE = 1001;
+    private boolean scanEnabled = false;
 
-    private SearchCommand pendingCommand = null;
+    private final StringBuilder scanLog =
+            new StringBuilder();
+
+    private final Set<String> seenRequests =
+            new LinkedHashSet<>();
+
+    private static final int MAX_REQUESTS = 500;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(10, 10, 10, 0);
+        LinearLayout root =
+                new LinearLayout(this);
 
-        // =====================================================
-        // SEARCH ROW
-        // =====================================================
-
-        LinearLayout searchRow = new LinearLayout(this);
-        searchRow.setOrientation(LinearLayout.HORIZONTAL);
-
-        searchInput = new EditText(this);
-        searchInput.setHint(
-                "Например: BMW X5 2024 дизел"
-        );
-        searchInput.setSingleLine(true);
-        searchInput.setTextSize(17);
-
-        Button micButton = new Button(this);
-        micButton.setText("🎤");
-        micButton.setTextSize(22);
-
-        searchRow.addView(
-                searchInput,
-                new LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        1
-                )
+        root.setOrientation(
+                LinearLayout.VERTICAL
         );
 
-        searchRow.addView(
-                micButton,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        );
+        // ==========================================
+        // STATUS
+        // ==========================================
 
-        Button searchButton = new Button(this);
+        status =
+                new TextView(this);
 
-        searchButton.setText(
-                "ПОКАЖИ РЕЗУЛТАТИТЕ"
-        );
-
-        status = new TextView(this);
-        status.setPadding(10, 12, 10, 12);
-        status.setTextSize(14);
         status.setText(
-                "Напиши или кажи автомобил."
+                "Готово.\n" +
+                "Натисни START NETWORK SCAN."
         );
 
-        webView = new WebView(this);
+        status.setTextSize(14);
+        status.setPadding(
+                20,
+                15,
+                20,
+                15
+        );
+
+        status.setTextIsSelectable(true);
+
+        // ==========================================
+        // BUTTONS
+        // ==========================================
+
+        Button startButton =
+                new Button(this);
+
+        startButton.setText(
+                "START NETWORK SCAN"
+        );
+
+        Button stopButton =
+                new Button(this);
+
+        stopButton.setText(
+                "STOP SCAN"
+        );
+
+        Button clearButton =
+                new Button(this);
+
+        clearButton.setText(
+                "CLEAR SCAN"
+        );
+
+        Button copyButton =
+                new Button(this);
+
+        copyButton.setText(
+                "COPY SCAN"
+        );
+
+        // ==========================================
+        // WEBVIEW
+        // ==========================================
+
+        webView =
+                new WebView(this);
 
         WebSettings settings =
                 webView.getSettings();
@@ -103,18 +122,21 @@ public class MainActivity extends Activity {
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
 
-        CookieManager.getInstance()
+        CookieManager
+                .getInstance()
                 .setAcceptCookie(true);
 
-        CookieManager.getInstance()
+        CookieManager
+                .getInstance()
                 .setAcceptThirdPartyCookies(
                         webView,
                         true
                 );
 
+        // JavaScript -> Android bridge
         webView.addJavascriptInterface(
-                new SearchBridge(),
-                "AndroidSearch"
+                new NetworkBridge(),
+                "AndroidScanner"
         );
 
         webView.setWebViewClient(
@@ -131,35 +153,57 @@ public class MainActivity extends Activity {
                                 url
                         );
 
+                        if (scanEnabled) {
+
+                            injectNetworkScanner();
+                        }
+                    }
+
+                    @Override
+                    public WebResourceResponse
+                    shouldInterceptRequest(
+                            WebView view,
+                            WebResourceRequest request
+                    ) {
+
                         if (
-                                pendingCommand != null &&
-                                url != null &&
-                                url.contains(
-                                        "car.encar.com/list/car"
-                                )
+                                scanEnabled &&
+                                request != null &&
+                                request.getUrl() != null
                         ) {
 
-                            status.setText(
-                                    "Encar е зареден.\n" +
-                                    "Търся производителя..."
-                            );
+                            String url =
+                                    request
+                                            .getUrl()
+                                            .toString();
 
-                            handler.postDelayed(
-                                    () ->
-                                            startUniversalSearch(
-                                                    pendingCommand
-                                            ),
-                                    1500
+                            String method =
+                                    request
+                                            .getMethod();
+
+                            logRequest(
+                                    "WEBVIEW",
+                                    method,
+                                    url,
+                                    ""
                             );
                         }
+
+                        return super
+                                .shouldInterceptRequest(
+                                        view,
+                                        request
+                                );
                     }
                 }
         );
 
-        root.addView(searchRow);
+        // ==========================================
+        // LAYOUT
+        // ==========================================
 
         root.addView(
-                searchButton,
+                status,
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
@@ -167,7 +211,31 @@ public class MainActivity extends Activity {
         );
 
         root.addView(
-                status,
+                startButton,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                stopButton,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                clearButton,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                copyButton,
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
@@ -185,892 +253,271 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        micButton.setOnClickListener(
-                v -> startVoiceRecognition()
+        // ==========================================
+        // BUTTON ACTIONS
+        // ==========================================
+
+        startButton.setOnClickListener(
+                v -> startScan()
         );
 
-        searchButton.setOnClickListener(
-                v -> beginSearch()
+        stopButton.setOnClickListener(
+                v -> stopScan()
         );
 
-        // Зареждаме Encar още при стартиране.
+        clearButton.setOnClickListener(
+                v -> clearScan()
+        );
+
+        copyButton.setOnClickListener(
+                v -> copyScan()
+        );
+
+        // ==========================================
+        // LOAD ENCAR
+        // ==========================================
+
         webView.loadUrl(
                 "https://car.encar.com/list/car"
         );
     }
 
-    // =========================================================
-    // VOICE
-    // =========================================================
+    // ==========================================================
+    // START
+    // ==========================================================
 
-    private void startVoiceRecognition() {
+    private void startScan() {
 
-        try {
+        scanEnabled = true;
 
-            Intent intent =
-                    new Intent(
-                            RecognizerIntent
-                                    .ACTION_RECOGNIZE_SPEECH
-                    );
+        scanLog.setLength(0);
+        seenRequests.clear();
 
-            intent.putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent
-                            .LANGUAGE_MODEL_FREE_FORM
-            );
-
-            intent.putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE,
-                    "bg-BG"
-            );
-
-            intent.putExtra(
-                    RecognizerIntent.EXTRA_PROMPT,
-                    "Кажи марка, модел, година и гориво"
-            );
-
-            startActivityForResult(
-                    intent,
-                    SPEECH_REQUEST_CODE
-            );
-
-        } catch (Exception e) {
-
-            status.setText(
-                    "Гласовото разпознаване " +
-                    "не е достъпно."
-            );
-        }
-    }
-
-    @Override
-    protected void onActivityResult(
-            int requestCode,
-            int resultCode,
-            Intent data
-    ) {
-
-        super.onActivityResult(
-                requestCode,
-                resultCode,
-                data
+        scanLog.append(
+                "===== ENCAR NETWORK SCAN =====\n\n"
         );
-
-        if (
-                requestCode ==
-                        SPEECH_REQUEST_CODE &&
-                resultCode ==
-                        RESULT_OK &&
-                data != null
-        ) {
-
-            ArrayList<String> results =
-                    data.getStringArrayListExtra(
-                            RecognizerIntent.EXTRA_RESULTS
-                    );
-
-            if (
-                    results != null &&
-                    !results.isEmpty()
-            ) {
-
-                String spoken =
-                        results.get(0);
-
-                searchInput.setText(spoken);
-
-                searchInput.setSelection(
-                        spoken.length()
-                );
-
-                status.setText(
-                        "Разпознато:\n" +
-                        spoken +
-                        "\n\n" +
-                        "Провери текста и натисни " +
-                        "ПОКАЖИ РЕЗУЛТАТИТЕ."
-                );
-            }
-        }
-    }
-
-    // =========================================================
-    // START SEARCH
-    // =========================================================
-
-    private void beginSearch() {
-
-        String text =
-                searchInput
-                        .getText()
-                        .toString()
-                        .trim();
-
-        if (text.isEmpty()) {
-
-            status.setText(
-                    "Напиши или кажи автомобил."
-            );
-
-            return;
-        }
-
-        SearchCommand command =
-                parseCommand(text);
-
-        if (command.brand.isEmpty()) {
-
-            status.setText(
-                    "Не успях да определя марката."
-            );
-
-            return;
-        }
-
-        if (command.model.isEmpty()) {
-
-            status.setText(
-                    "Не успях да определя модела."
-            );
-
-            return;
-        }
-
-        pendingCommand =
-                command;
 
         status.setText(
-                "Разбрах:\n" +
-                "Марка: " +
-                command.brand +
-                "\n" +
-                "Модел: " +
-                command.model +
-                "\n" +
-                "Година: " +
-                command.year +
-                "\n" +
-                "Гориво: " +
-                command.fuel +
-                "\n\n" +
-                "Подготвям Encar..."
+                "SCAN ACTIVE ✅\n\n" +
+                "Сега ръчно направи:\n\n" +
+                "Change search conditions\n" +
+                "→ Manufacturer\n" +
+                "→ Kia\n" +
+                "→ Sorento\n" +
+                "→ поколение\n\n" +
+                "После натисни STOP SCAN."
         );
 
-        String current =
-                webView.getUrl();
-
-        if (
-                current == null ||
-                !current.contains(
-                        "car.encar.com/list/car"
-                )
-        ) {
-
-            webView.loadUrl(
-                    "https://car.encar.com/list/car"
-            );
-
-        } else {
-
-            startUniversalSearch(
-                    command
-            );
-        }
+        injectNetworkScanner();
     }
 
-    // =========================================================
-    // PARSER
-    // =========================================================
+    // ==========================================================
+    // STOP
+    // ==========================================================
 
-    private SearchCommand parseCommand(
-            String original
-    ) {
+    private void stopScan() {
 
-        SearchCommand result =
-                new SearchCommand();
+        scanEnabled = false;
 
-        String text =
-                original
-                        .trim()
-                        .replaceAll(
-                                "\\s+",
-                                " "
-                        );
+        scanLog.append(
+                "\n===== SCAN STOPPED =====\n"
+        );
 
-        String lower =
-                text.toLowerCase(
-                        Locale.ROOT
-                );
-
-        // YEAR
-
-        Matcher matcher =
-                Pattern.compile(
-                        "\\b(20\\d{2})\\b"
-                ).matcher(lower);
-
-        if (matcher.find()) {
-
-            result.year =
-                    matcher.group(1);
-
-            lower =
-                    lower.replace(
-                            result.year,
-                            " "
-                    );
-        }
-
-        // FUEL
-
-        if (
-                lower.contains("дизел") ||
-                lower.contains("diesel")
-        ) {
-
-            result.fuel =
-                    "Diesel";
-
-            lower =
-                    lower
-                            .replace(
-                                    "дизел",
-                                    " "
-                            )
-                            .replace(
-                                    "diesel",
-                                    " "
-                            );
-
-        } else if (
-                lower.contains("хибрид") ||
-                lower.contains("hybrid")
-        ) {
-
-            result.fuel =
-                    "Hybrid";
-
-            lower =
-                    lower
-                            .replace(
-                                    "хибрид",
-                                    " "
-                            )
-                            .replace(
-                                    "hybrid",
-                                    " "
-                            );
-
-        } else if (
-                lower.contains("бензин") ||
-                lower.contains("gasoline") ||
-                lower.contains("petrol")
-        ) {
-
-            result.fuel =
-                    "Gasoline";
-
-            lower =
-                    lower
-                            .replace(
-                                    "бензин",
-                                    " "
-                            )
-                            .replace(
-                                    "gasoline",
-                                    " "
-                            )
-                            .replace(
-                                    "petrol",
-                                    " "
-                            );
-
-        } else if (
-                lower.contains("електр") ||
-                lower.contains("electric") ||
-                lower.contains(" ev")
-        ) {
-
-            result.fuel =
-                    "Electric";
-
-            lower =
-                    lower
-                            .replace(
-                                    "електрически",
-                                    " "
-                            )
-                            .replace(
-                                    "електрическа",
-                                    " "
-                            )
-                            .replace(
-                                    "electric",
-                                    " "
-                            );
-        }
-
-        lower =
-                lower.replaceAll(
-                        "\\s+",
-                        " "
-                ).trim();
-
-        String[] parts =
-                lower.split(" ");
-
-        if (parts.length >= 1) {
-
-            result.brand =
-                    normalizeBrand(
-                            parts[0]
-                    );
-        }
-
-        if (parts.length >= 2) {
-
-            StringBuilder model =
-                    new StringBuilder();
-
-            for (
-                    int i = 1;
-                    i < parts.length;
-                    i++
-            ) {
-
-                if (
-                        parts[i].equals("г") ||
-                        parts[i].equals("г.") ||
-                        parts[i].equals("година")
-                ) {
-                    continue;
-                }
-
-                if (model.length() > 0) {
-                    model.append(" ");
-                }
-
-                model.append(
-                        parts[i]
-                );
-            }
-
-            result.model =
-                    model
-                            .toString()
-                            .trim();
-        }
-
-        return result;
+        status.setText(
+                "SCAN STOPPED ✅\n\n" +
+                "Хванати заявки: " +
+                seenRequests.size() +
+                "\n\n" +
+                "Натисни COPY SCAN и ми прати отчета."
+        );
     }
 
-    // =========================================================
-    // BRAND NORMALIZATION
-    //
-    // Това НЕ съдържа модели.
-    // Само различни начини, по които гласът може
-    // да изпише името на производителя.
-    // =========================================================
+    // ==========================================================
+    // CLEAR
+    // ==========================================================
 
-    private String normalizeBrand(
-            String brand
-    ) {
+    private void clearScan() {
 
-        String b =
-                brand
-                        .toLowerCase(
-                                Locale.ROOT
-                        )
-                        .trim();
+        scanEnabled = false;
 
-        switch (b) {
+        scanLog.setLength(0);
+        seenRequests.clear();
 
-            case "киа":
-                return "Kia";
-
-            case "хюндай":
-            case "хюндаи":
-            case "хундай":
-            case "hyundai":
-                return "Hyundai";
-
-            case "мерцедес":
-            case "мерседес":
-            case "mercedes":
-                return "Mercedes";
-
-            case "бмв":
-            case "bmw":
-                return "BMW";
-
-            case "ауди":
-            case "audi":
-                return "Audi";
-
-            case "фолксваген":
-            case "волксваген":
-            case "volkswagen":
-            case "vw":
-                return "Volkswagen";
-
-            case "порше":
-            case "porsche":
-                return "Porsche";
-
-            case "форд":
-            case "ford":
-                return "Ford";
-
-            case "тойота":
-            case "toyota":
-                return "Toyota";
-
-            case "лексус":
-            case "lexus":
-                return "Lexus";
-
-            case "волво":
-            case "volvo":
-                return "Volvo";
-
-            case "пежо":
-            case "peugeot":
-                return "Peugeot";
-
-            case "хонда":
-            case "honda":
-                return "Honda";
-
-            case "ниссан":
-            case "nissan":
-                return "Nissan";
-
-            case "шевролет":
-            case "chevrolet":
-                return "Chevrolet";
-
-            case "джип":
-            case "jeep":
-                return "Jeep";
-
-            case "рендж":
-            case "landrover":
-                return "Land Rover";
-
-            default:
-
-                if (brand.length() > 0) {
-
-                    return brand
-                            .substring(0, 1)
-                            .toUpperCase(
-                                    Locale.ROOT
-                            ) +
-                            brand.substring(1);
-                }
-
-                return "";
-        }
+        status.setText(
+                "Скенерът е изчистен."
+        );
     }
 
-    // =========================================================
-    // UNIVERSAL ENCAR SEARCH
-    // =========================================================
+    // ==========================================================
+    // JAVASCRIPT NETWORK SCANNER
+    // ==========================================================
 
-    private void startUniversalSearch(
-            SearchCommand command
-    ) {
-
-        String brand =
-                jsEscape(
-                        command.brand
-                );
-
-        String model =
-                jsEscape(
-                        command.model
-                );
-
-        String year =
-                jsEscape(
-                        command.year
-                );
-
-        String fuel =
-                jsEscape(
-                        command.fuel
-                );
-
-        /*
-         * Основната разлика спрямо Sorento версията:
-         *
-         * НЯМА:
-         *
-         * Manufacturer.기아
-         * ModelGroup.쏘렌토
-         * Model.더 뉴 쏘렌토...
-         *
-         * Тук четем живите опции на Encar.
-         */
+    private void injectNetworkScanner() {
 
         String script =
                 "(function() {" +
 
-                "const BRAND='" +
-                brand +
-                "';" +
-
-                "const MODEL='" +
-                model +
-                "';" +
-
-                "const YEAR='" +
-                year +
-                "';" +
-
-                "const FUEL='" +
-                fuel +
-                "';" +
-
-                "function norm(s) {" +
-                " return (s || '')" +
-                ".toLowerCase()" +
-                ".replace(/[^a-z0-9가-힣]+/g,'');" +
-                "}" +
-
-                "function text(el) {" +
-                " return (" +
-                "el.innerText || " +
-                "el.textContent || ''" +
-                ").trim();" +
-                "}" +
-
-                "function visible(el) {" +
-                " if (!el) return false;" +
-                " const r=el.getBoundingClientRect();" +
-                " const st=getComputedStyle(el);" +
-                " return r.width>0 && " +
-                "r.height>0 && " +
-                "st.display!=='none' && " +
-                "st.visibility!=='hidden';" +
-                "}" +
-
-                "function clickable() {" +
-                " return Array.from(" +
-                "document.querySelectorAll(" +
-                "'a,button,[role=\"button\"],label'" +
-                ")" +
-                ").filter(visible);" +
-                "}" +
-
-                "function bestMatch(word) {" +
-
-                " const target=norm(word);" +
-
-                " if (!target) return null;" +
-
-                " const els=clickable();" +
-
-                " let exact=null;" +
-                " let contains=null;" +
-
-                " for (const el of els) {" +
-
-                "   const t=norm(text(el));" +
-
-                "   if (!t) continue;" +
-
-                "   if (t===target) {" +
-                "      exact=el;" +
-                "      break;" +
-                "   }" +
-
-                "   if (" +
-                "      !contains && " +
-                "      (t.includes(target) || " +
-                "       target.includes(t))" +
-                "   ) {" +
-                "      contains=el;" +
-                "   }" +
-
-                " }" +
-
-                " return exact || contains;" +
-                "}" +
-
-                "function clickText(word) {" +
-
-                " const el=bestMatch(word);" +
-
-                " if (!el) return false;" +
-
-                " el.scrollIntoView({" +
-                "   block:'center'" +
-                " });" +
-
-                " el.click();" +
-
-                " return true;" +
-                "}" +
-
-                "function report(step,msg) {" +
-
-                " AndroidSearch.onStatus(" +
-                " step + '|' + msg" +
-                " );" +
-                "}" +
-
-                // ===========================================
-                // MANUFACTURER
-                // ===========================================
-
-                "let manufacturer=" +
-                "document.querySelector('#optManufact');" +
-
-                "if (!manufacturer) {" +
-
-                " const candidates=clickable();" +
-
-                " manufacturer=" +
-                "candidates.find(function(el) {" +
-
-                "   const t=norm(text(el));" +
-
-                "   return " +
-                "t==='manufacturer' || " +
-                "t==='make' || " +
-                "t.includes('manufacturer');" +
-
-                " });" +
-                "}" +
-
-                "if (!manufacturer) {" +
-
-                " report(" +
-                "'ERROR'," +
-                "'Не намерих Manufacturer филтъра'" +
-                ");" +
-
-                " return;" +
-                "}" +
-
-                "manufacturer.click();" +
-
-                "report(" +
-                "'MANUFACTURER_OPEN'," +
-                "'Manufacturer е отворен'" +
-                ");" +
-
-                // ===========================================
-                // BRAND
-                // ===========================================
-
-                "setTimeout(function() {" +
-
-                " if (!clickText(BRAND)) {" +
-
-                "   report(" +
-                "'ERROR'," +
-                "'Не намерих марка: '+BRAND" +
-                ");" +
-
+                "if (window.__ENCAR_NETWORK_SCANNER__) {" +
                 "   return;" +
-                " }" +
+                "}" +
 
-                " report(" +
-                "'BRAND_OK'," +
-                "'Избрана марка: '+BRAND" +
-                ");" +
+                "window.__ENCAR_NETWORK_SCANNER__ = true;" +
 
-                // ===========================================
-                // MODEL CONTROL
-                // ===========================================
+                // =============================================
+                // FETCH
+                // =============================================
 
-                " setTimeout(function() {" +
+                "const originalFetch = window.fetch;" +
 
-                "   let modelControl=null;" +
+                "window.fetch = function(input, init) {" +
 
-                "   const controls=clickable();" +
+                "   try {" +
 
-                "   modelControl=" +
-                "controls.find(function(el) {" +
+                "       let url = '';" +
 
-                "      const t=norm(text(el));" +
+                "       if (typeof input === 'string') {" +
+                "           url = input;" +
+                "       } else if (input && input.url) {" +
+                "           url = input.url;" +
+                "       }" +
 
-                "      return " +
-                "      t==='model' || " +
-                "      t.includes('model');" +
+                "       let method = " +
+                "           (init && init.method) " +
+                "           ? init.method " +
+                "           : 'GET';" +
 
-                "   });" +
+                "       let body = " +
+                "           (init && init.body) " +
+                "           ? String(init.body) " +
+                "           : '';" +
 
-                "   if (!modelControl) {" +
+                "       if (body.length > 3000) {" +
+                "           body = body.substring(0,3000);" +
+                "       }" +
 
-                "      const ids=Array.from(" +
-                "      document.querySelectorAll('[id]')" +
-                "      );" +
+                "       AndroidScanner.onNetworkRequest(" +
+                "           'FETCH'," +
+                "           method," +
+                "           String(url)," +
+                "           body" +
+                "       );" +
 
-                "      modelControl=ids.find(function(el) {" +
+                "   } catch(e) {}" +
 
-                "         return " +
-                "         /model/i.test(el.id) && " +
-                "         visible(el);" +
+                "   return originalFetch.apply(" +
+                "       this," +
+                "       arguments" +
+                "   );" +
 
-                "      });" +
-                "   }" +
+                "};" +
 
-                "   if (!modelControl) {" +
+                // =============================================
+                // XHR
+                // =============================================
 
-                "      report(" +
-                "'ERROR'," +
-                "'Марката е избрана, но не намерих Model филтъра'" +
-                ");" +
+                "const originalOpen = " +
+                "XMLHttpRequest.prototype.open;" +
 
-                "      return;" +
-                "   }" +
+                "const originalSend = " +
+                "XMLHttpRequest.prototype.send;" +
 
-                "   modelControl.click();" +
+                "XMLHttpRequest.prototype.open = " +
+                "function(method, url) {" +
 
-                "   report(" +
-                "'MODEL_OPEN'," +
-                "'Model е отворен'" +
-                ");" +
+                "   try {" +
+                "       this.__scanMethod = method;" +
+                "       this.__scanUrl = url;" +
+                "   } catch(e) {}" +
 
-                // ===========================================
-                // MODEL
-                // ===========================================
+                "   return originalOpen.apply(" +
+                "       this," +
+                "       arguments" +
+                "   );" +
+                "};" +
 
-                "   setTimeout(function() {" +
+                "XMLHttpRequest.prototype.send = " +
+                "function(body) {" +
 
-                "      if (!clickText(MODEL)) {" +
+                "   try {" +
 
-                "         report(" +
-                "'ERROR'," +
-                "'Не намерих модел: '+MODEL" +
-                ");" +
+                "       let b = body " +
+                "           ? String(body) " +
+                "           : '';" +
 
-                "         return;" +
-                "      }" +
+                "       if (b.length > 3000) {" +
+                "           b = b.substring(0,3000);" +
+                "       }" +
 
-                "      report(" +
-                "'MODEL_OK'," +
-                "'Избран модел: '+MODEL" +
-                ");" +
+                "       AndroidScanner.onNetworkRequest(" +
+                "           'XHR'," +
+                "           String(this.__scanMethod || 'GET')," +
+                "           String(this.__scanUrl || '')," +
+                "           b" +
+                "       );" +
 
-                // ===========================================
-                // YEAR
-                // ===========================================
+                "   } catch(e) {}" +
 
-                "      setTimeout(function() {" +
+                "   return originalSend.apply(" +
+                "       this," +
+                "       arguments" +
+                "   );" +
+                "};" +
 
-                "         if (YEAR) {" +
+                // =============================================
+                // HISTORY / URL CHANGES
+                // =============================================
 
-                "            let yearControl=" +
-                "            clickable().find(function(el) {" +
+                "const originalPushState = " +
+                "history.pushState;" +
 
-                "               const t=norm(text(el));" +
+                "history.pushState = function() {" +
 
-                "               return " +
-                "               t==='year' || " +
-                "               t.includes('modelyear') || " +
-                "               t.includes('year');" +
+                "   let result = " +
+                "       originalPushState.apply(" +
+                "           this," +
+                "           arguments" +
+                "       );" +
 
-                "            });" +
+                "   try {" +
 
-                "            if (yearControl) {" +
+                "       AndroidScanner.onNetworkRequest(" +
+                "           'HISTORY'," +
+                "           'PUSH'," +
+                "           location.href," +
+                "           ''" +
+                "       );" +
 
-                "               yearControl.click();" +
+                "   } catch(e) {}" +
 
-                "               setTimeout(function() {" +
+                "   return result;" +
+                "};" +
 
-                "                  if (clickText(YEAR)) {" +
+                "const originalReplaceState = " +
+                "history.replaceState;" +
 
-                "                     report(" +
-                "'YEAR_OK'," +
-                "'Избрана година: '+YEAR" +
-                ");" +
+                "history.replaceState = function() {" +
 
-                "                  } else {" +
+                "   let result = " +
+                "       originalReplaceState.apply(" +
+                "           this," +
+                "           arguments" +
+                "       );" +
 
-                "                     report(" +
-                "'YEAR_SKIP'," +
-                "'Не намерих директна година '+YEAR" +
-                ");" +
-                "                  }" +
+                "   try {" +
 
-                "               },700);" +
-                "            }" +
-                "         }" +
+                "       AndroidScanner.onNetworkRequest(" +
+                "           'HISTORY'," +
+                "           'REPLACE'," +
+                "           location.href," +
+                "           ''" +
+                "       );" +
 
-                // ===========================================
-                // FUEL
-                // ===========================================
+                "   } catch(e) {}" +
 
-                "         setTimeout(function() {" +
+                "   return result;" +
+                "};" +
 
-                "            if (FUEL) {" +
-
-                "               let fuelControl=" +
-                "               clickable().find(function(el) {" +
-
-                "                  const t=norm(text(el));" +
-
-                "                  return " +
-                "                  t==='fuel' || " +
-                "                  t.includes('fueltype') || " +
-                "                  t.includes('fuel');" +
-
-                "               });" +
-
-                "               if (fuelControl) {" +
-
-                "                  fuelControl.click();" +
-
-                "                  setTimeout(function() {" +
-
-                "                     if (" +
-                "                     clickText(FUEL)" +
-                "                     ) {" +
-
-                "                        report(" +
-                "'FUEL_OK'," +
-                "'Избрано гориво: '+FUEL" +
-                ");" +
-
-                "                     } else {" +
-
-                "                        report(" +
-                "'FUEL_SKIP'," +
-                "'Не намерих гориво: '+FUEL" +
-                ");" +
-
-                "                     }" +
-
-                "                  },700);" +
-                "               }" +
-                "            }" +
-
-                // ===========================================
-                // FINISH
-                // ===========================================
-
-                "            setTimeout(function() {" +
-
-                "               report(" +
-                "'DONE'," +
-                "'Филтрите са приложени'" +
-                ");" +
-
-                "            },1200);" +
-
-                "         },900);" +
-
-                "      },900);" +
-
-                "   },900);" +
-
-                " },900);" +
-
-                "},700);" +
+                "AndroidScanner.onScannerInstalled();" +
 
                 "})();";
 
@@ -1080,89 +527,234 @@ public class MainActivity extends Activity {
         );
     }
 
-    private String jsEscape(
-            String value
-    ) {
+    // ==========================================================
+    // JS BRIDGE
+    // ==========================================================
 
-        if (value == null) {
-            return "";
-        }
-
-        return value
-                .replace(
-                        "\\",
-                        "\\\\"
-                )
-                .replace(
-                        "'",
-                        "\\'"
-                )
-                .replace(
-                        "\n",
-                        " "
-                );
-    }
-
-    // =========================================================
-    // ANDROID <-> JAVASCRIPT
-    // =========================================================
-
-    private class SearchBridge {
+    private class NetworkBridge {
 
         @JavascriptInterface
-        public void onStatus(
-                String message
+        public void onScannerInstalled() {
+
+            if (!scanEnabled) {
+                return;
+            }
+
+            runOnUiThread(
+                    () -> status.setText(
+                            "NETWORK SCANNER ACTIVE ✅\n\n" +
+                            "Сега отвори филтрите на Encar " +
+                            "и избери Kia → Sorento."
+                    )
+            );
+        }
+
+        @JavascriptInterface
+        public void onNetworkRequest(
+                String source,
+                String method,
+                String url,
+                String body
         ) {
 
-            runOnUiThread(() -> {
+            if (!scanEnabled) {
+                return;
+            }
 
-                String[] parts =
-                        message.split(
-                                "\\|",
-                                2
-                        );
-
-                String step =
-                        parts.length > 0
-                                ? parts[0]
-                                : "";
-
-                String msg =
-                        parts.length > 1
-                                ? parts[1]
-                                : message;
-
-                status.setText(
-                        msg
-                );
-
-                if (
-                        step.equals(
-                                "DONE"
-                        )
-                ) {
-
-                    pendingCommand = null;
-                }
-            });
+            logRequest(
+                    source,
+                    method,
+                    url,
+                    body
+            );
         }
     }
 
-    // =========================================================
-    // COMMAND CLASS
-    // =========================================================
+    // ==========================================================
+    // LOG
+    // ==========================================================
 
-    private static class SearchCommand {
+    private synchronized void logRequest(
+            String source,
+            String method,
+            String url,
+            String body
+    ) {
 
-        String brand = "";
-        String model = "";
-        String year = "";
-        String fuel = "";
+        if (!scanEnabled) {
+            return;
+        }
+
+        if (
+                url == null ||
+                url.trim().isEmpty()
+        ) {
+            return;
+        }
+
+        /*
+         * Филтрираме най-полезните заявки.
+         * Иначе браузърът прави стотици заявки
+         * за картинки, CSS, реклами и т.н.
+         */
+
+        String lower =
+                url.toLowerCase();
+
+        boolean interesting =
+                lower.contains("api") ||
+                lower.contains("search") ||
+                lower.contains("model") ||
+                lower.contains("manufacturer") ||
+                lower.contains("vehicle") ||
+                lower.contains("car/list") ||
+                lower.contains("grade") ||
+                lower.contains("category") ||
+                lower.contains("encar.com");
+
+        if (!interesting) {
+            return;
+        }
+
+        String key =
+                source +
+                "|" +
+                method +
+                "|" +
+                url +
+                "|" +
+                body;
+
+        if (seenRequests.contains(key)) {
+            return;
+        }
+
+        if (
+                seenRequests.size() >=
+                        MAX_REQUESTS
+        ) {
+            return;
+        }
+
+        seenRequests.add(key);
+
+        scanLog.append(
+                "------------------------------\n"
+        );
+
+        scanLog.append(
+                "SOURCE: "
+        );
+
+        scanLog.append(
+                source
+        );
+
+        scanLog.append(
+                "\n"
+        );
+
+        scanLog.append(
+                "METHOD: "
+        );
+
+        scanLog.append(
+                method
+        );
+
+        scanLog.append(
+                "\n"
+        );
+
+        scanLog.append(
+                "URL:\n"
+        );
+
+        scanLog.append(
+                url
+        );
+
+        scanLog.append(
+                "\n"
+        );
+
+        if (
+                body != null &&
+                !body.trim().isEmpty()
+        ) {
+
+            scanLog.append(
+                    "BODY:\n"
+            );
+
+            scanLog.append(
+                    body
+            );
+
+            scanLog.append(
+                    "\n"
+            );
+        }
+
+        runOnUiThread(() -> {
+
+            status.setText(
+                    "NETWORK SCANNER ACTIVE ✅\n\n" +
+                    "Хванати заявки: " +
+                    seenRequests.size() +
+                    "\n\n" +
+                    "Продължи с филтрите."
+            );
+
+        });
     }
 
-    // =========================================================
+    // ==========================================================
+    // COPY
+    // ==========================================================
+
+    private void copyScan() {
+
+        String text =
+                scanLog.toString();
+
+        if (text.isEmpty()) {
+
+            status.setText(
+                    "Няма записани заявки."
+            );
+
+            return;
+        }
+
+        ClipboardManager clipboard =
+                (ClipboardManager)
+                        getSystemService(
+                                Context.CLIPBOARD_SERVICE
+                        );
+
+        ClipData clip =
+                ClipData.newPlainText(
+                        "Encar Network Scan",
+                        text
+                );
+
+        clipboard.setPrimaryClip(
+                clip
+        );
+
+        status.setText(
+                "NETWORK REPORT COPIED ✅\n\n" +
+                "Заявки: " +
+                seenRequests.size() +
+                "\n\n" +
+                "Постави целия отчет в чата."
+        );
+    }
+
+    // ==========================================================
     // BACK
-    // =========================================================
+    // ==========================================================
 
     @Override
     public void onBackPressed() {
