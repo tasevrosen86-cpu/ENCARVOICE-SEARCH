@@ -1,840 +1,2090 @@
-private void buildBrandDatabase() {
+package com.encarvoicesearch;
 
-    brands.clear();
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.RecognizerIntent;
+import android.view.ViewGroup;
+import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import org.json.JSONObject;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class MainActivity extends Activity {
+
+    private static final int VOICE_REQUEST = 1001;
+    private static final int MAX_READ_ATTEMPTS = 12;
+
+    private WebView webView;
+    private TextView status;
+    private EditText searchInput;
+
+    private final Handler handler =
+            new Handler(Looper.getMainLooper());
+
+    private int readAttempts = 0;
+    private String lastResult = "";
+    private String lastCarUrl = "";
+
+    private static class CarSearchSpec {
+
+        String displayName;
+        String manufacturer;
+        String carType;
+        String modelGroup;
+        String exactModel;
+
+        CarSearchSpec(
+                String displayName,
+                String manufacturer,
+                String carType,
+                String modelGroup,
+                String exactModel
+        ) {
+            this.displayName = displayName;
+            this.manufacturer = manufacturer;
+            this.carType = carType;
+            this.modelGroup = modelGroup;
+            this.exactModel = exactModel;
+        }
+    }
 
 
     // =========================================================
-    // MERCEDES-BENZ
+    // KIA
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "벤츠",
-                    "N",
-                    "mercedes-benz",
-                    "mercedes",
-                    "benz",
-                    "мерцедес"
-            )
+    private static final String[][] KIA_MODELS = {
 
-                    .model("e class", "E-클래스")
-                    .model("e-class", "E-클래스")
-                    .model("e-클래스", "E-클래스")
+            {"Bongo", "봉고III 미니버스", "", "bongo"},
+            {"Enterprise", "엔터프라이즈", "", "enterprise"},
+            {"Sportage", "스포티지", "", "sportage|спортидж|спортаж|спортейдж"},
+            {"Telluride", "텔루라이드", "", "telluride|телурайд"},
+            {"Carnival", "카니발", "", "carnival|karnival|карнивал"},
+            {"Potentia", "포텐샤", "", "potentia"},
+            {"Parktown", "파크타운", "", "parktown"},
+            {"Fiat 132", "피아트132", "", "fiat 132"},
 
-                    .model("s class", "S-클래스")
-                    .model("s-class", "S-클래스")
-                    .model("s-클래스", "S-클래스")
+            {
+                    "Sorento",
+                    "쏘렌토",
+                    "더 뉴 쏘렌토 4세대",
+                    "sorento|соренто"
+            },
 
-                    .model("glc", "GLC-클래스")
-                    .model("glc-클래스", "GLC-클래스")
+            {"Picanto", "모닝", "", "picanto|morning|пиканто"},
+            {"Stinger", "스팅어", "", "stinger|стингер"},
+            {"Capital", "캐피탈", "", "capital"},
+            {"Carstar", "카스타", "", "carstar"},
+            {"Rocksta", "록스타", "", "rocksta"},
+            {"Spectra", "스펙트라", "", "spectra"},
+            {"Concord", "콩코드", "", "concord"},
+            {"Mohave", "모하비", "", "mohave|mohavi|мохаве"},
+            {"Seltos", "셀토스", "", "seltos|селтос"},
+            {"Stonic", "스토닉", "", "stonic|стоник"},
+            {"Tasman", "타스만", "", "tasman|тасман"},
+            {"Carens", "카렌스", "", "carens|каренс"},
+            {"Opirus", "오피러스", "", "opirus|опирус"},
+            {"Sephia", "세피아", "", "sephia"},
+            {"Avella", "아벨라", "", "avella"},
+            {"Credos", "크레도스", "", "credos"},
+            {"Towner", "타우너", "", "towner"},
+            {"Optima", "옵티마", "", "optima"},
+            {"Cerato", "쎄라토", "", "cerato"},
+            {"Pregio", "프레지오", "", "pregio"},
+            {"Retona", "레토나", "", "retona|ретона"},
+            {"X Trek", "X-TREK", "", "x trek|x-trek"},
+            {"Pride", "프라이드", "", "pride"},
+            {"Forte", "포르테", "", "forte|форте"},
+            {"Lotze", "로체", "", "lotze"},
+            {"Regal", "리갈", "", "regal"},
+            {"Visto", "비스토", "", "visto"},
+            {"Besta", "베스타", "", "besta"},
+            {"Topic", "토픽", "", "topic"},
+            {"Shuma", "슈마", "", "shuma"},
+            {"Brisa", "브리샤", "", "brisa"},
+            {"Delta", "델타", "", "delta"},
+            {"Ceed", "씨드", "", "ceed|cee d"},
+            {"Niro", "니로", "", "niro|ниро"},
+            {"Soul", "쏘울", "", "soul|соул"},
+            {"Elan", "엘란", "", "elan"},
+            {"Ray", "레이", "", "ray|рей"},
 
-                    .model("gle", "GLE-클래스")
-                    .model("gle-클래스", "GLE-클래스")
+            {"EV6", "EV6", "", ""},
+            {"EV3", "EV3", "", ""},
+            {"EV9", "EV9", "", ""},
+            {"EV5", "EV5", "", ""},
+            {"EV4", "EV4", "", ""},
+            {"PV5", "PV5", "", ""},
 
-                    .model("c class", "C-클래스")
-                    .model("c-class", "C-클래스")
-                    .model("c-클래스", "C-클래스")
+            {"Rio", "리오", "", "rio|рио"},
 
-                    .model("cls", "CLS-클래스")
-                    .model("cls-클래스", "CLS-클래스")
+            {"K5", "K5", "", ""},
+            {"K7", "K7", "", ""},
+            {"K3", "K3", "", ""},
+            {"K8", "K8", "", ""},
+            {"K9", "K9", "", ""}
+    };
 
-                    .model("a class", "A-클래스")
-                    .model("a-class", "A-클래스")
-                    .model("a-클래스", "A-클래스")
 
-                    .model("glb", "GLB-클래스")
-                    .model("glb-클래스", "GLB-클래스")
+    // =========================================================
+    // HYUNDAI
+    // =========================================================
 
-                    .model("g class", "G-클래스")
-                    .model("g-class", "G-클래스")
-                    .model("g-클래스", "G-클래스")
+    private static final String[][] HYUNDAI_MODELS = {
 
-                    .model("cla", "CLA-클래스")
-                    .model("cla-클래스", "CLA-클래스")
+            {"Elantra Old", "엘란트라", "", "elantra old|old elantra"},
+            {"Maxcruz", "맥스크루즈", "", "maxcruz|maxcruise"},
+            {"Trajet XG", "트라제 XG", "", "trajet xg"},
 
-                    .model("gls", "GLS-클래스")
-                    .model("gls-클래스", "GLS-클래스")
+            {"Grandeur", "그랜저", "", "grandeur|azera|грандер"},
 
-                    .model("amg gt", "AMG GT")
+            {
+                    "Santa Fe",
+                    "싼타페",
+                    "",
+                    "santa fe|santafe|санта фе|сантафе"
+            },
 
-                    .model("gla", "GLA-클래스")
-                    .model("gla-클래스", "GLA-클래스")
+            {
+                    "Palisade",
+                    "팰리세이드",
+                    "",
+                    "palisade|палисейд|палисад"
+            },
 
-                    .model("cle", "CLE-클래스")
-                    .model("cle-클래스", "CLE-클래스")
+            {"Veloster", "벨로스터", "", "veloster|велостер"},
+            {"Veracruz", "베라크루즈", "", "veracruz|веракруз"},
+            {"Galloper", "갤로퍼", "", "galloper|галопер"},
+            {"Terracan", "테라칸", "", "terracan|теракан"},
 
-                    .model("eqs", "EQS")
-                    .model("eqe", "EQE")
-                    .model("eqb", "EQB")
+            {
+                    "Avante",
+                    "아반떼",
+                    "",
+                    "avante|elantra|елантра"
+            },
 
-                    .model("sprinter", "스프린터")
-                    .model("спринтер", "스프린터")
-                    .model("스프린터", "스프린터")
+            {"Starex", "스타렉스", "", "starex|старекс"},
+            {"Genesis", "제네시스", "", "genesis|генезис"},
 
-                    .model("eqa", "EQA")
+            {"Ioniq 5", "아이오닉5", "", "ioniq 5|ioniq5"},
+            {"Ioniq 6", "아이오닉6", "", "ioniq 6|ioniq6"},
+            {"Ioniq 9", "아이오닉9", "", "ioniq 9|ioniq9"},
 
-                    .model("sl", "SL-클래스")
-                    .model("sl-클래스", "SL-클래스")
+            {"Tuscani", "투스카니", "", "tuscani"},
+            {"Dynasty", "다이너스티", "", "dynasty"},
+            {"Tiburon", "티뷰론", "", "tiburon"},
+            {"Santamo", "산타모", "", "santamo"},
+            {"Stellar", "스텔라", "", "stellar"},
+            {"Cortina", "코티나", "", "cortina"},
+            {"Granada", "그라나다", "", "granada"},
 
-                    .model("b class", "B-클래스")
-                    .model("b-class", "B-클래스")
-                    .model("b-클래스", "B-클래스")
+            {"Sonata", "쏘나타", "", "sonata|соната"},
 
-                    .model("glk", "GLK-클래스")
-                    .model("glk-클래스", "GLK-클래스")
+            {
+                    "Tucson",
+                    "투싼",
+                    "",
+                    "tucson|tuson|туксон|тусон"
+            },
 
-                    .model("m class", "M-클래스")
-                    .model("m-class", "M-클래스")
-                    .model("m-클래스", "M-클래스")
+            {"Staria", "스타리아", "", "staria|стария"},
+            {"Casper", "캐스퍼", "", "casper|каспер"},
+            {"Accent", "엑센트", "", "accent|акцент"},
+            {"Solati", "쏠라티", "", "solati"},
+            {"Marcia", "마르샤", "", "marcia"},
+            {"Scoupe", "스쿠프", "", "scoupe"},
+            {"Presto", "프레스토", "", "presto"},
+            {"Lavita", "라비타", "", "lavita"},
+            {"BlueOn", "블루온", "", "blueon"},
+            {"Equus", "에쿠스", "", "equus|екуус"},
+            {"Venue", "베뉴", "", "venue|веню"},
+            {"Nexo", "넥쏘", "", "nexo|нексо"},
 
-                    .model("slk", "SLK-클래스")
-                    .model("slk-클래스", "SLK-클래스")
+            {"Ioniq", "아이오닉", "", "ioniq"},
 
-                    .model("slc", "SLC-클래스")
-                    .model("slc-클래스", "SLC-클래스")
+            {"Aslan", "아슬란", "", "aslan"},
+            {"Verna", "베르나", "", "verna"},
+            {"Excel", "엑셀", "", "excel"},
+            {"Grace", "그레이스", "", "grace"},
+            {"Click", "클릭", "", "click"},
+            {"Kona", "코나", "", "kona|кона"},
+            {"Pony", "포니", "", "pony"},
+            {"Atos", "아토스", "", "atos"},
 
-                    .model("v class", "V-클래스")
-                    .model("v-class", "V-클래스")
-                    .model("v-클래스", "V-클래스")
+            {"i30", "i30", "", ""},
+            {"i40", "i40", "", ""},
+            {"ST1", "ST1", "", ""}
+    };
 
-                    .model("eqc", "EQC")
 
-                    .model("cl", "CL-클래스")
-                    .model("cl-클래스", "CL-클래스")
+    // =========================================================
+    // MERCEDES
+    // =========================================================
 
-                    .model("gl", "GL-클래스")
-                    .model("gl-클래스", "GL-클래스")
+    private static final String[][] MERCEDES_MODELS = {
 
-                    .model("sel/sec", "SEL/SEC")
-                    .model("sel", "SEL/SEC")
-                    .model("sec", "SEL/SEC")
+            {"190", "190-클래스", "", "190|190 class"},
+            {"Sprinter", "스프린터", "", "sprinter|спринтер"},
 
-                    .model("clk", "CLK-클래스")
-                    .model("clk-클래스", "CLK-클래스")
+            {"E Class", "E-클래스", "", "e class|e-class"},
+            {"S Class", "S-클래스", "", "s class|s-class"},
+            {"GLC", "GLC-클래스", "", "glc"},
+            {"GLE", "GLE-클래스", "", "gle"},
+            {"C Class", "C-클래스", "", "c class|c-class"},
+            {"CLS", "CLS-클래스", "", "cls"},
+            {"A Class", "A-클래스", "", "a class|a-class"},
+            {"GLB", "GLB-클래스", "", "glb"},
+            {"G Class", "G-클래스", "", "g class|g-class"},
+            {"CLA", "CLA-클래스", "", "cla"},
+            {"GLS", "GLS-클래스", "", "gls"},
+            {"GLA", "GLA-클래스", "", "gla"},
+            {"CLE", "CLE-클래스", "", "cle"},
 
-                    .model("sls amg", "SLS AMG")
+            {"B Class", "B-클래스", "", "b class|b-class"},
+            {"GLK", "GLK-클래스", "", "glk"},
+            {"M Class", "M-클래스", "", "m class|m-class"},
+            {"SLK", "SLK-클래스", "", "slk"},
+            {"SLC", "SLC-클래스", "", "slc"},
+            {"V Class", "V-클래스", "", "v class|v-class"},
 
-                    .model("r class", "R-클래스")
-                    .model("r-class", "R-클래스")
-                    .model("r-클래스", "R-클래스")
+            {"SEL/SEC", "SEL/SEC", "", "sel|sec|sel sec"},
+            {"CLK", "CLK-클래스", "", "clk"},
+            {"SLS AMG", "SLS AMG", "", "sls amg"},
+            {"R Class", "R-클래스", "", "r class|r-class"},
+            {"AMG GT", "AMG GT", "", "amg gt"},
+            {"SL", "SL-클래스", "", "sl"},
+            {"CL", "CL-클래스", "", "cl"},
+            {"GL", "GL-클래스", "", "gl"},
 
-                    .model("190", "190-클래스")
-                    .model("190 class", "190-클래스")
-                    .model("190-클래스", "190-클래스")
+            {"Other", "기타", "", "other"},
 
-                    .model("slr", "SLR")
-
-                    .model("other", "기타")
-                    .model("기타", "기타")
-    );
+            {"EQS", "EQS", "", ""},
+            {"EQE", "EQE", "", ""},
+            {"EQB", "EQB", "", ""},
+            {"EQA", "EQA", "", ""},
+            {"EQC", "EQC", "", ""},
+            {"SLR", "SLR", "", ""}
+    };
 
 
     // =========================================================
     // BMW
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "BMW",
-                    "N",
-                    "bmw",
-                    "бмв"
-            )
+    private static final String[][] BMW_MODELS = {
 
-                    .model("5 series", "5시리즈")
-                    .model("5series", "5시리즈")
-                    .model("5시리즈", "5시리즈")
+            {
+                    "Gran Turismo",
+                    "그란투리스모 (GT_",
+                    "",
+                    "gt|gran turismo|grand turismo"
+            },
 
-                    .model("3 series", "3시리즈")
-                    .model("3series", "3시리즈")
-                    .model("3시리즈", "3시리즈")
+            {
+                    "M Coupe/Roadster",
+                    "M 쿠페/로드스터",
+                    "",
+                    "m coupe|m roadster"
+            },
 
-                    .model("x5", "X5")
+            {"5 Series", "5시리즈", "", "5 series|5series"},
+            {"3 Series", "3시리즈", "", "3 series|3series"},
+            {"7 Series", "7시리즈", "", "7 series|7series"},
+            {"1 Series", "1시리즈", "", "1 series|1series"},
+            {"4 Series", "4시리즈", "", "4 series|4series"},
+            {"2 Series", "2시리즈", "", "2 series|2series"},
+            {"8 Series", "8시리즈", "", "8 series|8series"},
+            {"6 Series", "6시리즈", "", "6 series|6series"},
 
-                    .model("7 series", "7시리즈")
-                    .model("7series", "7시리즈")
-                    .model("7시리즈", "7시리즈")
+            {"Other", "기타", "", "other"},
 
-                    .model("gt", "그란투리스모 (GT_")
-                    .model("gran turismo", "그란투리스모 (GT_")
-                    .model("grand turismo", "그란투리스모 (GT_")
-                    .model("그란투리스모 (gt_", "그란투리스모 (GT_")
+            {"iX3", "iX3", "", ""},
+            {"X6M", "X6M", "", ""},
+            {"X5M", "X5M", "", ""},
+            {"X4M", "X4M", "", ""},
+            {"X3M", "X3M", "", ""},
+            {"iX2", "iX2", "", ""},
+            {"iX1", "iX1", "", ""},
 
-                    .model("x6", "X6")
-                    .model("x3", "X3")
-                    .model("x7", "X7")
-                    .model("x4", "X4")
+            {"X5", "X5", "", ""},
+            {"X6", "X6", "", ""},
+            {"X3", "X3", "", ""},
+            {"X7", "X7", "", ""},
+            {"X4", "X4", "", ""},
+            {"X1", "X1", "", ""},
 
-                    .model("1 series", "1시리즈")
-                    .model("1series", "1시리즈")
-                    .model("1시리즈", "1시리즈")
-
-                    .model("4 series", "4시리즈")
-                    .model("4series", "4시리즈")
-                    .model("4시리즈", "4시리즈")
-
-                    .model("x1", "X1")
-
-                    .model("2 series", "2시리즈")
-                    .model("2series", "2시리즈")
-                    .model("2시리즈", "2시리즈")
-
-                    .model("z4", "Z4")
-                    .model("i4", "i4")
-
-                    .model("8 series", "8시리즈")
-                    .model("8series", "8시리즈")
-                    .model("8시리즈", "8시리즈")
-
-                    .model("m2", "M2")
-                    .model("x2", "X2")
-                    .model("m4", "M4")
-                    .model("m3", "M3")
-                    .model("m5", "M5")
-
-                    .model("6 series", "6시리즈")
-                    .model("6series", "6시리즈")
-                    .model("6시리즈", "6시리즈")
-
-                    .model("i5", "i5")
-                    .model("i7", "i7")
-                    .model("xm", "XM")
-                    .model("ix3", "iX3")
-                    .model("x6m", "X6M")
-                    .model("ix", "iX")
-                    .model("x5m", "X5M")
-                    .model("x4m", "X4M")
-                    .model("i3", "i3")
-                    .model("i8", "i8")
-                    .model("x3m", "X3M")
-                    .model("ix2", "iX2")
-                    .model("ix1", "iX1")
-                    .model("m8", "M8")
-                    .model("m6", "M6")
-                    .model("1m", "1M")
-                    .model("z3", "Z3")
-
-                    .model("m coupe", "M 쿠페/로드스터")
-                    .model("m roadster", "M 쿠페/로드스터")
-                    .model("m 쿠페/로드스터", "M 쿠페/로드스터")
-
-                    .model("z8", "Z8")
-
-                    .model("other", "기타")
-                    .model("기타", "기타")
-    );
+            {"Z4", "Z4", "", ""},
+            {"i4", "i4", "", ""},
+            {"M2", "M2", "", ""},
+            {"X2", "X2", "", ""},
+            {"M4", "M4", "", ""},
+            {"M3", "M3", "", ""},
+            {"M5", "M5", "", ""},
+            {"i5", "i5", "", ""},
+            {"i7", "i7", "", ""},
+            {"XM", "XM", "", ""},
+            {"iX", "iX", "", ""},
+            {"i3", "i3", "", ""},
+            {"i8", "i8", "", ""},
+            {"M8", "M8", "", ""},
+            {"M6", "M6", "", ""},
+            {"1M", "1M", "", ""},
+            {"Z3", "Z3", "", ""},
+            {"Z8", "Z8", "", ""}
+    };
 
 
     // =========================================================
     // AUDI
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "아우디",
-                    "N",
-                    "audi",
-                    "ауди"
-            )
+    private static final String[][] AUDI_MODELS = {
 
-                    .model("a6", "A6")
-                    .model("q5", "Q5")
-                    .model("q7", "Q7")
-                    .model("a7", "A7")
-                    .model("a4", "A4")
-                    .model("a5", "A5")
-                    .model("a8", "A8")
-                    .model("q3", "Q3")
-                    .model("q8", "Q8")
-                    .model("a3", "A3")
+            {
+                    "Allroad Quattro",
+                    "올로드 콰트로",
+                    "",
+                    "allroad quattro"
+            },
 
-                    .model("e-tron", "e-트론")
-                    .model("etron", "e-트론")
-                    .model("e-트론", "e-트론")
+            {
+                    "RS e-tron GT",
+                    "RS e-트론 GT",
+                    "",
+                    "rs e-tron gt|rs etron gt"
+            },
 
-                    .model("q4 e-tron", "Q4 e-트론")
-                    .model("q4 etron", "Q4 e-트론")
-                    .model("q4 e-트론", "Q4 e-트론")
+            {
+                    "S e-tron GT",
+                    "S e-트론 GT",
+                    "",
+                    "s e-tron gt|s etron gt"
+            },
 
-                    .model("sq5", "SQ5")
-                    .model("r8", "R8")
-                    .model("q2", "Q2")
-                    .model("s8", "S8")
+            {
+                    "SQ6 e-tron",
+                    "SQ6 e-트론",
+                    "",
+                    "sq6 e-tron|sq6 etron"
+            },
 
-                    .model("a6 e-tron", "A6 e-트론")
-                    .model("a6 etron", "A6 e-트론")
-                    .model("a6 e-트론", "A6 e-트론")
+            {
+                    "SQ8 e-tron",
+                    "SQ8 e-트론",
+                    "",
+                    "sq8 e-tron|sq8 etron"
+            },
 
-                    .model("tt", "TT")
+            {
+                    "Q4 e-tron",
+                    "Q4 e-트론",
+                    "",
+                    "q4 e-tron|q4 etron"
+            },
 
-                    .model("e-tron gt", "e-트론 GT")
-                    .model("etron gt", "e-트론 GT")
-                    .model("e-트론 gt", "e-트론 GT")
+            {
+                    "A6 e-tron",
+                    "A6 e-트론",
+                    "",
+                    "a6 e-tron|a6 etron"
+            },
 
-                    .model("rs7", "RS7")
-                    .model("rs3", "RS3")
-                    .model("rs5", "RS5")
-                    .model("rsq8", "RSQ8")
-                    .model("s4", "S4")
-                    .model("s7", "S7")
-                    .model("s5", "S5")
-                    .model("sq7", "SQ7")
+            {
+                    "e-tron GT",
+                    "e-트론 GT",
+                    "",
+                    "e-tron gt|etron gt"
+            },
 
-                    .model("rs e-tron gt", "RS e-트론 GT")
-                    .model("rs etron gt", "RS e-트론 GT")
-                    .model("rs e-트론 gt", "RS e-트론 GT")
+            {
+                    "Q6 e-tron",
+                    "Q6 e-트론",
+                    "",
+                    "q6 e-tron|q6 etron"
+            },
 
-                    .model("q6 e-tron", "Q6 e-트론")
-                    .model("q6 etron", "Q6 e-트론")
-                    .model("q6 e-트론", "Q6 e-트론")
+            {
+                    "Q8 e-tron",
+                    "Q8 e-트론",
+                    "",
+                    "q8 e-tron|q8 etron"
+            },
 
-                    .model("rs6", "RS6")
-                    .model("s6", "S6")
-                    .model("a1", "A1")
-                    .model("s3", "S3")
+            {
+                    "S6 e-tron",
+                    "S6 e-트론",
+                    "",
+                    "s6 e-tron|s6 etron"
+            },
 
-                    .model("sq6 e-tron", "SQ6 e-트론")
-                    .model("sq6 etron", "SQ6 e-트론")
-                    .model("sq6 e-트론", "SQ6 e-트론")
+            {
+                    "e-tron",
+                    "e-트론",
+                    "",
+                    "e-tron|etron"
+            },
 
-                    .model("tts", "TTS")
+            {"Other", "기타", "", "other"},
 
-                    .model("q8 e-tron", "Q8 e-트론")
-                    .model("q8 etron", "Q8 e-트론")
-                    .model("q8 e-트론", "Q8 e-트론")
+            {"RSQ8", "RSQ8", "", ""},
+            {"TTRS", "TTRS", "", ""},
+            {"SQ5", "SQ5", "", ""},
+            {"RS7", "RS7", "", ""},
+            {"RS3", "RS3", "", ""},
+            {"RS5", "RS5", "", ""},
+            {"SQ7", "SQ7", "", ""},
+            {"RS6", "RS6", "", ""},
+            {"TTS", "TTS", "", ""},
+            {"RS4", "RS4", "", ""},
+            {"SQ8", "SQ8", "", ""},
 
-                    .model("rs4", "RS4")
-                    .model("sq8", "SQ8")
-
-                    .model("sq8 e-tron", "SQ8 e-트론")
-                    .model("sq8 etron", "SQ8 e-트론")
-                    .model("sq8 e-트론", "SQ8 e-트론")
-
-                    .model("allroad quattro", "올로드 콰트로")
-                    .model("올로드 콰트로", "올로드 콰트로")
-
-                    .model("ttrs", "TTRS")
-                    .model("v8", "V8")
-
-                    .model("s e-tron gt", "S e-트론 GT")
-                    .model("s etron gt", "S e-트론 GT")
-                    .model("s e-트론 gt", "S e-트론 GT")
-
-                    .model("s6 e-tron", "S6 e-트론")
-                    .model("s6 etron", "S6 e-트론")
-                    .model("s6 e-트론", "S6 e-트론")
-
-                    .model("other", "기타")
-                    .model("기타", "기타")
-    );
-
-
-    // =========================================================
-    // VOLKSWAGEN - старите записи остават
-    // =========================================================
-
-    brands.add(
-            new Brand(
-                    "폭스바겐",
-                    "N",
-                    "volkswagen",
-                    "vw",
-                    "фолксваген"
-            )
-
-                    .model("tiguan", "티구안")
-                    .model("touareg", "투아렉")
-                    .model("arteon", "아테온")
-                    .model("passat", "파사트")
-                    .model("golf", "골프")
-                    .model("t-roc", "티록")
-                    .model("t roc", "티록")
-    );
-
-
-    // =========================================================
-    // PORSCHE
-    // =========================================================
-
-    brands.add(
-            new Brand(
-                    "포르쉐",
-                    "N",
-                    "porsche",
-                    "порше"
-            )
-
-                    .model("cayenne", "카이엔")
-                    .model("macan", "마칸")
-                    .model("panamera", "파나메라")
-                    .model("911", "911")
-                    .model("718", "718")
-    );
+            {"A6", "A6", "", ""},
+            {"Q5", "Q5", "", ""},
+            {"Q7", "Q7", "", ""},
+            {"A7", "A7", "", ""},
+            {"A4", "A4", "", ""},
+            {"A5", "A5", "", ""},
+            {"A8", "A8", "", ""},
+            {"Q3", "Q3", "", ""},
+            {"Q8", "Q8", "", ""},
+            {"A3", "A3", "", ""},
+            {"R8", "R8", "", ""},
+            {"Q2", "Q2", "", ""},
+            {"S8", "S8", "", ""},
+            {"TT", "TT", "", ""},
+            {"S4", "S4", "", ""},
+            {"S7", "S7", "", ""},
+            {"S5", "S5", "", ""},
+            {"S6", "S6", "", ""},
+            {"A1", "A1", "", ""},
+            {"S3", "S3", "", ""},
+            {"V8", "V8", "", ""}
+    };
 
 
     // =========================================================
-    // FORD
+    // UI
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "포드",
-                    "N",
-                    "ford",
-                    "форд"
-            )
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
 
-                    .model("explorer", "익스플로러")
-                    .model("mustang", "머스탱")
-                    .model("ranger", "레인저")
-                    .model("bronco", "브롱코")
-                    .model("f-150", "F150")
-                    .model("f150", "F150")
-    );
+        super.onCreate(savedInstanceState);
+
+        LinearLayout root =
+                new LinearLayout(this);
+
+        root.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        searchInput =
+                new EditText(this);
+
+        searchInput.setHint(
+                "Kia Sorento 2025 дизел"
+        );
+
+        searchInput.setTextSize(18);
+
+        searchInput.setSingleLine(false);
+
+        searchInput.setMinLines(2);
+
+        searchInput.setPadding(
+                20,
+                15,
+                20,
+                15
+        );
+
+
+        LinearLayout buttons =
+                new LinearLayout(this);
+
+        buttons.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+
+        Button voiceButton =
+                new Button(this);
+
+        voiceButton.setText(
+                "🎤 ГЛАС"
+        );
+
+
+        Button searchButton =
+                new Button(this);
+
+        searchButton.setText(
+                "🔎 ТЪРСИ"
+        );
+
+
+        LinearLayout.LayoutParams buttonParams =
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1
+                );
+
+        buttons.addView(
+                voiceButton,
+                buttonParams
+        );
+
+        buttons.addView(
+                searchButton,
+                buttonParams
+        );
+
+
+        status =
+                new TextView(this);
+
+        status.setText(
+                "Готово"
+        );
+
+        status.setTextSize(14);
+
+        status.setPadding(
+                20,
+                15,
+                20,
+                15
+        );
+
+        status.setTextIsSelectable(true);
+
+
+        LinearLayout tools =
+                new LinearLayout(this);
+
+        tools.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+
+        Button readButton =
+                new Button(this);
+
+        readButton.setText(
+                "ПЪРВА ОБЯВА"
+        );
+
+
+        Button openButton =
+                new Button(this);
+
+        openButton.setText(
+                "ОТВОРИ"
+        );
+
+
+        Button copyButton =
+                new Button(this);
+
+        copyButton.setText(
+                "КОПИРАЙ"
+        );
+
+
+        LinearLayout.LayoutParams toolParams =
+                new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1
+                );
+
+        tools.addView(
+                readButton,
+                toolParams
+        );
+
+        tools.addView(
+                openButton,
+                toolParams
+        );
+
+        tools.addView(
+                copyButton,
+                toolParams
+        );
+
+
+        webView =
+                new WebView(this);
+
+        WebSettings settings =
+                webView.getSettings();
+
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
+        settings.setLoadsImagesAutomatically(true);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+
+
+        CookieManager
+                .getInstance()
+                .setAcceptCookie(true);
+
+        CookieManager
+                .getInstance()
+                .setAcceptThirdPartyCookies(
+                        webView,
+                        true
+                );
+
+
+        webView.addJavascriptInterface(
+                new CarReader(),
+                "AndroidCarReader"
+        );
+
+
+        webView.setWebViewClient(
+                new WebViewClient() {
+
+                    @Override
+                    public void onPageFinished(
+                            WebView view,
+                            String url
+                    ) {
+
+                        super.onPageFinished(
+                                view,
+                                url
+                        );
+
+                        if (
+                                url != null &&
+                                url.contains(
+                                        "car.encar.com/list/car"
+                                )
+                        ) {
+
+                            status.setText(
+                                    "Резултатите се зареждат..."
+                            );
+
+                            handler.postDelayed(
+                                    () -> startReading(),
+                                    1800
+                            );
+                        }
+                    }
+                }
+        );
+
+
+        root.addView(
+                searchInput,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                buttons,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                status,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                tools,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        root.addView(
+                webView,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1
+                )
+        );
+
+
+        setContentView(root);
+
+
+        voiceButton.setOnClickListener(
+                v -> startVoice()
+        );
+
+        searchButton.setOnClickListener(
+                v -> searchFromInput()
+        );
+
+        readButton.setOnClickListener(
+                v -> startReading()
+        );
+
+        openButton.setOnClickListener(
+                v -> openFirstCar()
+        );
+
+        copyButton.setOnClickListener(
+                v -> copyResult()
+        );
+    }
 
 
     // =========================================================
-    // PEUGEOT
+    // VOICE
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "푸조",
-                    "N",
-                    "peugeot",
-                    "пежо"
-            )
+    private void startVoice() {
 
-                    .model("2008", "2008")
-                    .model("3008", "3008")
-                    .model("5008", "5008")
-                    .model("508", "508")
-    );
+        Intent intent =
+                new Intent(
+                        RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+                );
+
+        intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+        );
+
+        intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                "bg-BG"
+        );
+
+        intent.putExtra(
+                RecognizerIntent.EXTRA_PROMPT,
+                "Кажи марка, модел, година и гориво"
+        );
+
+        try {
+
+            startActivityForResult(
+                    intent,
+                    VOICE_REQUEST
+            );
+
+        } catch (
+                ActivityNotFoundException e
+        ) {
+
+            Toast.makeText(
+                    this,
+                    "Няма гласово разпознаване",
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+
+        super.onActivityResult(
+                requestCode,
+                resultCode,
+                data
+        );
+
+        if (
+                requestCode == VOICE_REQUEST &&
+                resultCode == RESULT_OK &&
+                data != null
+        ) {
+
+            ArrayList<String> results =
+                    data.getStringArrayListExtra(
+                            RecognizerIntent.EXTRA_RESULTS
+                    );
+
+            if (
+                    results != null &&
+                    !results.isEmpty()
+            ) {
+
+                String text =
+                        results.get(0);
+
+                text =
+                        text.replaceAll(
+                                "\\b20\\s+(\\d{2})\\b",
+                                "20$1"
+                        );
+
+                searchInput.setText(
+                        text
+                );
+
+                searchInput.setSelection(
+                        searchInput
+                                .getText()
+                                .length()
+                );
+            }
+        }
+    }
 
 
     // =========================================================
-    // HONDA
+    // SEARCH INPUT
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "혼다",
-                    "N",
-                    "honda",
-                    "хонда"
-            )
+    private void searchFromInput() {
 
-                    .model("accord", "어코드")
-                    .model("cr-v", "CR-V")
-                    .model("crv", "CR-V")
-                    .model("civic", "시빅")
-                    .model("odyssey", "오딧세이")
-                    .model("hr-v", "HR-V")
-                    .model("hrv", "HR-V")
-                    .model("pilot", "파일럿")
-    );
+        String original =
+                searchInput
+                        .getText()
+                        .toString()
+                        .trim();
+
+        if (
+                original.isEmpty()
+        ) {
+
+            status.setText(
+                    "Кажи или напиши автомобил."
+            );
+
+            return;
+        }
+
+
+        String text =
+                original
+                        .toLowerCase(
+                                Locale.ROOT
+                        )
+                        .replaceAll(
+                                "\\s+",
+                                " "
+                        );
+
+
+        CarSearchSpec car =
+                detectCar(
+                        text
+                );
+
+
+        if (
+                car == null
+        ) {
+
+            status.setText(
+                    "Не разпознах модела.\n" +
+                    "Сканирани марки:\n" +
+                    "• Kia\n" +
+                    "• Hyundai\n" +
+                    "• Mercedes\n" +
+                    "• BMW\n" +
+                    "• Audi"
+            );
+
+            return;
+        }
+
+
+        Integer year =
+                findYear(
+                        text
+                );
+
+
+        if (
+                year == null
+        ) {
+
+            status.setText(
+                    "Не разпознах годината."
+            );
+
+            return;
+        }
+
+
+        String fuelKorean;
+        String fuelName;
+
+
+        if (
+                text.contains("дизел") ||
+                text.contains("diesel")
+        ) {
+
+            fuelKorean =
+                    "디젤";
+
+            fuelName =
+                    "DIESEL";
+
+        } else if (
+                text.contains("бензин") ||
+                text.contains("gasoline") ||
+                text.contains("petrol")
+        ) {
+
+            fuelKorean =
+                    "가솔린";
+
+            fuelName =
+                    "GASOLINE";
+
+        } else if (
+                text.contains("хибрид") ||
+                text.contains("hybrid")
+        ) {
+
+            fuelKorean =
+                    "가솔린+전기";
+
+            fuelName =
+                    "HYBRID";
+
+        } else {
+
+            status.setText(
+                    "Не разпознах горивото.\n" +
+                    "Кажи дизел, бензин или хибрид."
+            );
+
+            return;
+        }
+
+
+        searchCar(
+                car,
+                year,
+                fuelKorean,
+                fuelName
+        );
+    }
 
 
     // =========================================================
-    // KIA - ВСИЧКИ 58 MODEL GROUP ОТ SCAN
+    // MODEL DETECTION
     // =========================================================
 
-    brands.add(
-            new Brand(
+    private CarSearchSpec detectCar(
+            String text
+    ) {
+
+        if (
+                containsAnyTerm(
+                        text,
+                        "kia",
+                        "киа",
+                        "кия"
+                )
+        ) {
+
+            return findModelInTable(
+                    text,
+                    "Kia",
                     "기아",
                     "Y",
-                    "kia",
-                    "киа"
-            )
-
-                    .model("carnival", "카니발")
-                    .model("karnival", "카니발")
-                    .model("карнивал", "카니발")
-                    .model("카니발", "카니발")
-
-                    .model("sorento", "쏘렌토")
-                    .model("соренто", "쏘렌토")
-                    .model("쏘렌토", "쏘렌토")
-
-                    .model("k5", "K5")
-
-                    .model("ray", "레이")
-                    .model("рей", "레이")
-                    .model("레이", "레이")
-
-                    .model("sportage", "스포티지")
-                    .model("спортидж", "스포티지")
-                    .model("спортаж", "스포티지")
-                    .model("스포티지", "스포티지")
-
-                    .model("picanto", "모닝")
-                    .model("morning", "모닝")
-                    .model("пиканто", "모닝")
-                    .model("모닝", "모닝")
-
-                    .model("k7", "K7")
-                    .model("k3", "K3")
-
-                    .model("mohave", "모하비")
-                    .model("mohavi", "모하비")
-                    .model("мохаве", "모하비")
-                    .model("모하비", "모하비")
-
-                    .model("seltos", "셀토스")
-                    .model("селтос", "셀토스")
-                    .model("셀토스", "셀토스")
-
-                    .model("k8", "K8")
-
-                    .model("niro", "니로")
-                    .model("ниро", "니로")
-                    .model("니로", "니로")
-
-                    .model("k9", "K9")
-
-                    .model("ev6", "EV6")
-
-                    .model("stinger", "스팅어")
-                    .model("стингер", "스팅어")
-                    .model("스팅어", "스팅어")
-
-                    .model("soul", "쏘울")
-                    .model("соул", "쏘울")
-                    .model("쏘울", "쏘울")
-
-                    .model("stonic", "스토닉")
-                    .model("стоник", "스토닉")
-                    .model("스토닉", "스토닉")
-
-                    .model("pride", "프라이드")
-                    .model("프라이드", "프라이드")
-
-                    .model("ev3", "EV3")
-
-                    .model("tasman", "타스만")
-                    .model("тасман", "타스만")
-                    .model("타스만", "타스만")
-
-                    .model("carens", "카렌스")
-                    .model("каренс", "카렌스")
-                    .model("카렌스", "카렌스")
-
-                    .model("forte", "포르테")
-                    .model("форте", "포르테")
-                    .model("포르테", "포르테")
-
-                    .model("ev9", "EV9")
-                    .model("ev5", "EV5")
-
-                    .model("opirus", "오피러스")
-                    .model("опирус", "오피러스")
-                    .model("오피러스", "오피러스")
-
-                    .model("ev4", "EV4")
-                    .model("pv5", "PV5")
-
-                    .model("lotze", "로체")
-                    .model("로체", "로체")
-
-                    .model("bongo", "봉고III 미니버스")
-                    .model("봉고iii 미니버스", "봉고III 미니버스")
-
-                    .model("elan", "엘란")
-                    .model("엘란", "엘란")
-
-                    .model("capital", "캐피탈")
-                    .model("캐피탈", "캐피탈")
-
-                    .model("potentia", "포텐샤")
-                    .model("포텐샤", "포텐샤")
-
-                    .model("carstar", "카스타")
-                    .model("카스타", "카스타")
-
-                    .model("rocksta", "록스타")
-                    .model("록스타", "록스타")
-
-                    .model("regal", "리갈")
-                    .model("리갈", "리갈")
-
-                    .model("visto", "비스토")
-                    .model("비스토", "비스토")
-
-                    .model("sephia", "세피아")
-                    .model("세피아", "세피아")
-
-                    .model("spectra", "스펙트라")
-                    .model("스펙트라", "스펙트라")
-
-                    .model("avella", "아벨라")
-                    .model("아벨라", "아벨라")
-
-                    .model("enterprise", "엔터프라이즈")
-                    .model("엔터프라이즈", "엔터프라이즈")
-
-                    .model("credos", "크레도스")
-                    .model("크레도스", "크레도스")
-
-                    .model("towner", "타우너")
-                    .model("타우너", "타우너")
-
-                    .model("optima", "옵티마")
-                    .model("옵티마", "옵티마")
-
-                    .model("besta", "베스타")
-                    .model("베스타", "베스타")
-
-                    .model("cerato", "쎄라토")
-                    .model("쎄라토", "쎄라토")
-
-                    .model("pregio", "프레지오")
-                    .model("프레지오", "프레지오")
-
-                    .model("rio", "리오")
-                    .model("리오", "리오")
-
-                    .model("retona", "레토나")
-                    .model("ретона", "레토나")
-                    .model("레토나", "레토나")
-
-                    .model("x-trek", "X-TREK")
-                    .model("x trek", "X-TREK")
-
-                    .model("concord", "콩코드")
-                    .model("콩코드", "콩코드")
-
-                    .model("topic", "토픽")
-                    .model("토픽", "토픽")
-
-                    .model("shuma", "슈마")
-                    .model("슈마", "슈마")
-
-                    .model("brisa", "브리샤")
-                    .model("브리샤", "브리샤")
-
-                    .model("parktown", "파크타운")
-                    .model("파크타운", "파크타운")
-
-                    .model("delta", "델타")
-                    .model("델타", "델타")
-
-                    .model("ceed", "씨드")
-                    .model("cee d", "씨드")
-                    .model("씨드", "씨드")
-
-                    .model("telluride", "텔루라이드")
-                    .model("телурайд", "텔루라이드")
-                    .model("텔루라이드", "텔루라이드")
-
-                    .model("fiat 132", "피아트132")
-                    .model("피아트132", "피아트132")
-    );
+                    KIA_MODELS
+            );
+        }
 
 
-    // =========================================================
-    // HYUNDAI - ВСИЧКИ 49 MODEL GROUP ОТ SCAN
-    // =========================================================
+        if (
+                containsAnyTerm(
+                        text,
+                        "hyundai",
+                        "хюндай",
+                        "хундай",
+                        "хендай",
+                        "хюнде"
+                )
+        ) {
 
-    brands.add(
-            new Brand(
+            return findModelInTable(
+                    text,
+                    "Hyundai",
                     "현대",
                     "Y",
-                    "hyundai",
-                    "хюндай",
-                    "хундай"
-            )
+                    HYUNDAI_MODELS
+            );
+        }
 
-                    .model("grandeur", "그랜저")
-                    .model("azera", "그랜저")
-                    .model("грандер", "그랜저")
-                    .model("그랜저", "그랜저")
 
-                    .model("avante", "아반떼")
-                    .model("elantra", "아반떼")
-                    .model("елантра", "아반떼")
-                    .model("아반떼", "아반떼")
+        if (
+                containsAnyTerm(
+                        text,
+                        "mercedes-benz",
+                        "mercedes",
+                        "benz",
+                        "мерцедес",
+                        "мерседес"
+                )
+        ) {
 
-                    .model("santa fe", "싼타페")
-                    .model("santafe", "싼타페")
-                    .model("санта фе", "싼타페")
-                    .model("싼타페", "싼타페")
+            return findModelInTable(
+                    text,
+                    "Mercedes",
+                    "벤츠",
+                    "N",
+                    MERCEDES_MODELS
+            );
+        }
 
-                    .model("sonata", "쏘나타")
-                    .model("соната", "쏘나타")
-                    .model("쏘나타", "쏘나타")
 
-                    .model("palisade", "팰리세이드")
-                    .model("палисейд", "팰리세이드")
-                    .model("палисад", "팰리세이드")
-                    .model("팰리세이드", "팰리세이드")
+        if (
+                containsAnyTerm(
+                        text,
+                        "bmw",
+                        "бмв"
+                )
+        ) {
 
-                    .model("tucson", "투싼")
-                    .model("tuson", "투싼")
-                    .model("туксон", "투싼")
-                    .model("туксън", "투싼")
-                    .model("투싼", "투싼")
+            return findModelInTable(
+                    text,
+                    "BMW",
+                    "BMW",
+                    "N",
+                    BMW_MODELS
+            );
+        }
 
-                    .model("starex", "스타렉스")
-                    .model("старекс", "스타렉스")
-                    .model("스타렉스", "스타렉스")
 
-                    .model("staria", "스타리아")
-                    .model("стария", "스타리아")
-                    .model("스타리아", "스타리아")
+        if (
+                containsAnyTerm(
+                        text,
+                        "audi",
+                        "ауди"
+                )
+        ) {
 
-                    .model("casper", "캐스퍼")
-                    .model("каспер", "캐스퍼")
-                    .model("캐스퍼", "캐스퍼")
+            return findModelInTable(
+                    text,
+                    "Audi",
+                    "아우디",
+                    "N",
+                    AUDI_MODELS
+            );
+        }
 
-                    .model("kona", "코나")
-                    .model("кона", "코나")
-                    .model("코나", "코나")
 
-                    .model("genesis", "제네시스")
-                    .model("генезис", "제네시스")
-                    .model("제네시스", "제네시스")
+        return null;
+    }
 
-                    .model("ioniq 5", "아이오닉5")
-                    .model("ioniq5", "아이오닉5")
-                    .model("아이오닉5", "아이오닉5")
 
-                    .model("equus", "에쿠스")
-                    .model("екуус", "에쿠스")
-                    .model("에쿠스", "에쿠스")
+    private CarSearchSpec findModelInTable(
+            String text,
+            String brandDisplay,
+            String manufacturer,
+            String carType,
+            String[][] table
+    ) {
 
-                    .model("maxcruz", "맥스크루즈")
-                    .model("maxcruise", "맥스크루즈")
-                    .model("맥스크루즈", "맥스크루즈")
+        for (
+                String[] row :
+                table
+        ) {
 
-                    .model("accent", "엑센트")
-                    .model("акцент", "엑센트")
-                    .model("엑센트", "엑센트")
+            String displayModel =
+                    row[0];
 
-                    .model("venue", "베뉴")
-                    .model("веню", "베뉴")
-                    .model("베뉴", "베뉴")
+            String modelGroup =
+                    row[1];
 
-                    .model("veloster", "벨로스터")
-                    .model("велостер", "벨로스터")
-                    .model("벨로스터", "벨로스터")
+            String exactModel =
+                    row[2];
 
-                    .model("nexo", "넥쏘")
-                    .model("нексо", "넥쏘")
-                    .model("넥쏘", "넥쏘")
+            String aliases =
+                    row[3];
 
-                    .model("i30", "i30")
 
-                    .model("ioniq 6", "아이오닉6")
-                    .model("ioniq6", "아이오닉6")
-                    .model("아이오닉6", "아이오닉6")
+            boolean matched =
+                    containsTerm(
+                            text,
+                            modelGroup
+                    );
 
-                    .model("veracruz", "베라크루즈")
-                    .model("веракруз", "베라크루즈")
-                    .model("베라크루즈", "베라크루즈")
 
-                    .model("i40", "i40")
+            if (
+                    !matched &&
+                    aliases != null &&
+                    !aliases.isEmpty()
+            ) {
 
-                    .model("ioniq", "아이오닉")
-                    .model("아이오닉", "아이오닉")
+                matched =
+                        containsAnyTerm(
+                                text,
+                                aliases.split(
+                                        "\\|"
+                                )
+                        );
+            }
 
-                    .model("aslan", "아슬란")
-                    .model("아슬란", "아슬란")
 
-                    .model("solati", "쏠라티")
-                    .model("쏠라티", "쏠라티")
+            if (
+                    matched
+            ) {
 
-                    .model("ioniq 9", "아이오닉9")
-                    .model("ioniq9", "아이오닉9")
-                    .model("아이오닉9", "아이오닉9")
+                return new CarSearchSpec(
+                        brandDisplay +
+                                " " +
+                                displayModel,
 
-                    .model("st1", "ST1")
+                        manufacturer,
 
-                    .model("galloper", "갤로퍼")
-                    .model("галопер", "갤로퍼")
-                    .model("갤로퍼", "갤로퍼")
+                        carType,
 
-                    .model("terracan", "테라칸")
-                    .model("теракан", "테라칸")
-                    .model("테라칸", "테라칸")
+                        modelGroup,
 
-                    .model("tuscani", "투스카니")
-                    .model("투스카니", "투스카니")
+                        exactModel.isEmpty()
+                                ? null
+                                : exactModel
+                );
+            }
+        }
 
-                    .model("dynasty", "다이너스티")
-                    .model("다이너스티", "다이너스티")
 
-                    .model("verna", "베르나")
-                    .model("베르나", "베르나")
+        return null;
+    }
 
-                    .model("tiburon", "티뷰론")
-                    .model("티뷰론", "티뷰론")
 
-                    .model("marcia", "마르샤")
-                    .model("마르샤", "마르샤")
+    private boolean containsAnyTerm(
+            String text,
+            String... terms
+    ) {
 
-                    .model("pony", "포니")
-                    .model("포니", "포니")
+        for (
+                String term :
+                terms
+        ) {
 
-                    .model("trajet xg", "트라제 XG")
-                    .model("트라제 xg", "트라제 XG")
+            if (
+                    containsTerm(
+                            text,
+                            term
+                    )
+            ) {
 
-                    .model("santamo", "산타모")
-                    .model("산타모", "산타모")
+                return true;
+            }
+        }
 
-                    .model("scoupe", "스쿠프")
-                    .model("스쿠프", "스쿠프")
 
-                    .model("excel", "엑셀")
-                    .model("엑셀", "엑셀")
+        return false;
+    }
 
-                    .model("elantra old", "엘란트라")
-                    .model("엘란트라", "엘란트라")
 
-                    .model("presto", "프레스토")
-                    .model("프레스토", "프레스토")
+    private boolean containsTerm(
+            String text,
+            String term
+    ) {
 
-                    .model("grace", "그레이스")
-                    .model("그레이스", "그레이스")
+        if (
+                term == null ||
+                term.trim().isEmpty()
+        ) {
 
-                    .model("click", "클릭")
-                    .model("클릭", "클릭")
+            return false;
+        }
 
-                    .model("lavita", "라비타")
-                    .model("라비타", "라비타")
 
-                    .model("stellar", "스텔라")
-                    .model("스텔라", "스텔라")
+        String normalizedText =
+                normalizeForMatch(
+                        text
+                );
 
-                    .model("atos", "아토스")
-                    .model("아토스", "아토스")
+        String normalizedTerm =
+                normalizeForMatch(
+                        term
+                );
 
-                    .model("cortina", "코티나")
-                    .model("코티나", "코티나")
 
-                    .model("granada", "그라나다")
-                    .model("그라나다", "그라나다")
+        return (
+                " " +
+                normalizedText +
+                " "
+        )
+                .contains(
+                        " " +
+                        normalizedTerm +
+                        " "
+                );
+    }
 
-                    .model("blueon", "블루온")
-                    .model("블루온", "블루온")
-    );
+
+    private String normalizeForMatch(
+            String value
+    ) {
+
+        return value
+                .toLowerCase(
+                        Locale.ROOT
+                )
+                .replaceAll(
+                        "[^\\p{L}\\p{N}]+",
+                        " "
+                )
+                .replaceAll(
+                        "\\s+",
+                        " "
+                )
+                .trim();
+    }
 
 
     // =========================================================
-    // GENESIS - старите записи остават
+    // YEAR
     // =========================================================
 
-    brands.add(
-            new Brand(
-                    "제네시스",
-                    "Y",
-                    "genesis",
-                    "дженезис"
-            )
+    private Integer findYear(
+            String text
+    ) {
 
-                    .model("gv70", "GV70")
-                    .model("gv80", "GV80")
-                    .model("g70", "G70")
-                    .model("g80", "G80")
-                    .model("g90", "G90")
-    );
+        text =
+                text.replaceAll(
+                        "\\b20\\s+(\\d{2})\\b",
+                        "20$1"
+                );
+
+
+        Matcher full =
+                Pattern.compile(
+                        "\\b(20\\d{2})\\b"
+                )
+                        .matcher(
+                                text
+                        );
+
+
+        if (
+                full.find()
+        ) {
+
+            try {
+
+                return Integer.parseInt(
+                        full.group(1)
+                );
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+
+        Matcher shortYear =
+                Pattern.compile(
+                        "\\b(1[5-9]|2[0-6])\\s*(?:г|година|год)?\\b"
+                )
+                        .matcher(
+                                text
+                        );
+
+
+        if (
+                shortYear.find()
+        ) {
+
+            try {
+
+                return 2000 +
+                        Integer.parseInt(
+                                shortYear.group(1)
+                        );
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+
+        return null;
+    }
+
+
+    // =========================================================
+    // ENCAR SEARCH
+    // =========================================================
+
+    private void searchCar(
+            CarSearchSpec car,
+            int year,
+            String fuel,
+            String fuelName
+    ) {
+
+        int yearFrom =
+                year * 100;
+
+        int yearTo =
+                yearFrom + 99;
+
+
+        StringBuilder action =
+                new StringBuilder();
+
+
+        action.append(
+                "(And.Year.range("
+        );
+
+        action.append(
+                yearFrom
+        );
+
+        action.append(
+                ".."
+        );
+
+        action.append(
+                yearTo
+        );
+
+        action.append(
+                ")."
+        );
+
+
+        action.append(
+                "_.Hidden.N."
+        );
+
+
+        action.append(
+                "_.(Or.Separation.F._.Separation.B.)"
+        );
+
+
+        action.append(
+                "_.SellType.일반."
+        );
+
+
+        // Kia / Hyundai = Y
+        // Mercedes / BMW / Audi = N
+        action.append(
+                "_.(C.CarType."
+        );
+
+        action.append(
+                car.carType
+        );
+
+        action.append(
+                "."
+        );
+
+
+        action.append(
+                "_.(C.Manufacturer."
+        );
+
+        action.append(
+                car.manufacturer
+        );
+
+        action.append(
+                "."
+        );
+
+
+        action.append(
+                "_.(C.ModelGroup."
+        );
+
+        action.append(
+                car.modelGroup
+        );
+
+        action.append(
+                "."
+        );
+
+
+        /*
+         * Запазваме точно работещия
+         * exact Model за Sorento.
+         *
+         * За останалите модели
+         * не гадаем поколение.
+         */
+        if (
+                car.exactModel != null &&
+                !car.exactModel.isEmpty()
+        ) {
+
+            action.append(
+                    "_.Model."
+            );
+
+            action.append(
+                    car.exactModel
+            );
+
+            action.append(
+                    "."
+            );
+        }
+
+
+        action.append(
+                ")"
+        );
+
+        action.append(
+                ")"
+        );
+
+        action.append(
+                ")"
+        );
+
+
+        action.append(
+                "_.FuelType."
+        );
+
+        action.append(
+                fuel
+        );
+
+        action.append(
+                "."
+        );
+
+
+        action.append(
+                ")"
+        );
+
+
+        String json =
+                "{" +
+
+                "\"type\":\"car\"," +
+
+                "\"action\":\"" +
+                action +
+                "\"," +
+
+                "\"toggle\":{}," +
+
+                "\"layer\":\"\"," +
+
+                "\"sort\":\"MobilePriceAsc\"" +
+
+                "}";
+
+
+        try {
+
+            String encoded =
+                    URLEncoder.encode(
+                            json,
+                            StandardCharsets.UTF_8.toString()
+                    );
+
+
+            String url =
+                    "https://car.encar.com/list/car?page=1&search=" +
+                    encoded;
+
+
+            lastResult =
+                    "";
+
+            lastCarUrl =
+                    "";
+
+
+            status.setText(
+                    "Търся " +
+                    car.displayName +
+                    " " +
+                    year +
+                    " " +
+                    fuelName +
+                    "\nНАЙ-НИСКА ЦЕНА ПЪРВО"
+            );
+
+
+            webView.loadUrl(
+                    url
+            );
+
+
+        } catch (
+                Exception e
+        ) {
+
+            status.setText(
+                    "Грешка при търсене: " +
+                    e.getMessage()
+            );
+        }
+    }
+
+
+    // =========================================================
+    // READ FIRST CAR
+    // =========================================================
+
+    private void startReading() {
+
+        readAttempts =
+                0;
+
+        status.setText(
+                "Търся първата реална обява..."
+        );
+
+        readFirstCar();
+    }
+
+
+    private void readFirstCar() {
+
+        readAttempts++;
+
+
+        String script =
+
+                "(function(){" +
+
+
+                "var links=Array.from(" +
+
+                "document.querySelectorAll(" +
+
+                "'a[href*=\"/cars/detail/\"]'" +
+
+                ")" +
+
+                ");" +
+
+
+                "var car=links.find(function(a){" +
+
+
+                "var txt=(a.innerText||a.textContent||'')" +
+
+                ".replace(/\\\\s+/g,' ')" +
+
+                ".trim();" +
+
+
+                "if(txt.length<15)return false;" +
+
+
+                "if(a.classList.contains('sponsored_type'))" +
+
+                "return false;" +
+
+
+                "var p=a.parentElement;" +
+
+
+                "while(p){" +
+
+
+                "if(p.classList&&" +
+
+                "p.classList.contains('sponsored_type'))" +
+
+                "return false;" +
+
+
+                "p=p.parentElement;" +
+
+                "}" +
+
+
+                "return true;" +
+
+
+                "});" +
+
+
+                "if(!car){" +
+
+
+                "AndroidCarReader.receiveCar(" +
+
+                "JSON.stringify({" +
+
+                "error:'NO_CAR_FOUND'" +
+
+                "})" +
+
+                ");" +
+
+
+                "return;" +
+
+
+                "}" +
+
+
+                "var text=" +
+
+                "(car.innerText||car.textContent||'')" +
+
+                ".replace(/\\\\s+/g,' ')" +
+
+                ".trim();" +
+
+
+                "var mileage=" +
+
+                "text.match(/([0-9][0-9,]*)\\\\s*km/i);" +
+
+
+                "var krw=" +
+
+                "text.match(/([0-9][0-9,]*)\\\\s*만원/);" +
+
+
+                "var usd=" +
+
+                "text.match(/([0-9][0-9,]*)\\\\s*USD/i);" +
+
+
+                "var year1=" +
+
+                "text.match(/([0-9]{2}\\\\/[0-9]{2}식" +
+
+                "(?:\\\\([0-9]{2}년형\\\\))?)/);" +
+
+
+                "var year2=" +
+
+                "text.match(/((?:0[1-9]|1[0-2])\\\\/20[0-9]{2})/);" +
+
+
+                "var fuel=" +
+
+                "text.match(/" +
+
+                "(가솔린 하이브리드|" +
+
+                "디젤 하이브리드|" +
+
+                "가솔린\\+전기|" +
+
+                "디젤|" +
+
+                "가솔린|" +
+
+                "전기|" +
+
+                "수소|" +
+
+                "Diesel Hybrid|" +
+
+                "Gasoline Hybrid|" +
+
+                "Diesel|" +
+
+                "Gasoline|" +
+
+                "Electric|" +
+
+                "EV|" +
+
+                "Hydrogen|" +
+
+                "LPG)" +
+
+                "/i);" +
+
+
+                "var href=car.href||'';" +
+
+
+                "var id=" +
+
+                "href.match(/\\/cars\\/detail\\/([0-9]+)/);" +
+
+
+                "AndroidCarReader.receiveCar(" +
+
+
+                "JSON.stringify({" +
+
+
+                "text:text," +
+
+
+                "url:href," +
+
+
+                "carId:(id?id[1]:'')," +
+
+
+                "mileage:(mileage?mileage[1]:'')," +
+
+
+                "year:(year1?year1[1]:" +
+
+                "(year2?year2[1]:''))," +
+
+
+                "fuel:(fuel?fuel[1]:'')," +
+
+
+                "priceKrw:(krw?krw[1]:'')," +
+
+
+                "priceUsd:(usd?usd[1]:'')" +
+
+
+                "})" +
+
+
+                ");" +
+
+
+                "})();";
+
+
+        webView.evaluateJavascript(
+                script,
+                null
+        );
+    }
+
+
+    // =========================================================
+    // JS -> ANDROID
+    // =========================================================
+
+    private class CarReader {
+
+        @JavascriptInterface
+        public void receiveCar(
+                String json
+        ) {
+
+            runOnUiThread(
+                    () -> {
+
+                        try {
+
+                            JSONObject obj =
+                                    new JSONObject(
+                                            json
+                                    );
+
+
+                            if (
+                                    obj.has(
+                                            "error"
+                                    )
+                            ) {
+
+                                if (
+                                        readAttempts <
+                                        MAX_READ_ATTEMPTS
+                                ) {
+
+                                    status.setText(
+                                            "Обявите още се зареждат... " +
+                                            readAttempts +
+                                            "/" +
+                                            MAX_READ_ATTEMPTS
+                                    );
+
+
+                                    handler.postDelayed(
+                                            () -> readFirstCar(),
+                                            1000
+                                    );
+
+
+                                } else {
+
+                                    status.setText(
+                                            "Не намерих обява след " +
+                                            MAX_READ_ATTEMPTS +
+                                            " опита."
+                                    );
+                                }
+
+
+                                return;
+                            }
+
+
+                            String carId =
+                                    obj.optString(
+                                            "carId"
+                                    );
+
+
+                            String year =
+                                    obj.optString(
+                                            "year"
+                                    );
+
+
+                            String mileage =
+                                    obj.optString(
+                                            "mileage"
+                                    );
+
+
+                            String fuel =
+                                    obj.optString(
+                                            "fuel"
+                                    );
+
+
+                            String priceKrw =
+                                    obj.optString(
+                                            "priceKrw"
+                                    );
+
+
+                            String priceUsd =
+                                    obj.optString(
+                                            "priceUsd"
+                                    );
+
+
+                            String url =
+                                    obj.optString(
+                                            "url"
+                                    );
+
+
+                            String raw =
+                                    obj.optString(
+                                            "text"
+                                    );
+
+
+                            lastCarUrl =
+                                    url;
+
+
+                            String price;
+
+
+                            if (
+                                    !priceKrw.isEmpty()
+                            ) {
+
+                                price =
+                                        priceKrw +
+                                        " 만원";
+
+
+                            } else if (
+                                    !priceUsd.isEmpty()
+                            ) {
+
+                                price =
+                                        priceUsd +
+                                        " USD";
+
+
+                            } else {
+
+                                price =
+                                        "не е разпозната";
+                            }
+
+
+                            lastResult =
+
+                                    "ПЪРВА ОБЯВА\n\n" +
+
+
+                                    "ID: " +
+                                    carId +
+                                    "\n" +
+
+
+                                    "Година: " +
+                                    year +
+                                    "\n" +
+
+
+                                    "Пробег: " +
+                                    mileage +
+                                    " km\n" +
+
+
+                                    "Гориво: " +
+                                    fuel +
+                                    "\n" +
+
+
+                                    "Цена: " +
+                                    price +
+                                    "\n\n" +
+
+
+                                    "LINK:\n" +
+                                    url +
+                                    "\n\n" +
+
+
+                                    "RAW:\n" +
+                                    raw;
+
+
+                            status.setText(
+                                    lastResult
+                            );
+
+
+                        } catch (
+                                Exception e
+                        ) {
+
+                            status.setText(
+                                    "Грешка при четене: " +
+                                    e.getMessage()
+                            );
+                        }
+                    }
+            );
+        }
+    }
+
+
+    // =========================================================
+    // OPEN FIRST CAR
+    // =========================================================
+
+    private void openFirstCar() {
+
+        if (
+                lastCarUrl == null ||
+                lastCarUrl.isEmpty()
+        ) {
+
+            status.setText(
+                    "Първо изчакай да намеря първата обява."
+            );
+
+            return;
+        }
+
+
+        webView.loadUrl(
+                lastCarUrl
+        );
+    }
+
+
+    // =========================================================
+    // COPY
+    // =========================================================
+
+    private void copyResult() {
+
+        String text =
+                lastResult;
+
+
+        if (
+                text == null ||
+                text.isEmpty()
+        ) {
+
+            text =
+                    status
+                            .getText()
+                            .toString();
+        }
+
+
+        ClipboardManager clipboard =
+                (ClipboardManager)
+                        getSystemService(
+                                Context.CLIPBOARD_SERVICE
+                        );
+
+
+        ClipData clip =
+                ClipData.newPlainText(
+                        "Encar result",
+                        text
+                );
+
+
+        clipboard.setPrimaryClip(
+                clip
+        );
+
+
+        status.setText(
+                text +
+                "\n\nКОПИРАНО ✅"
+        );
+    }
+
+
+    @Override
+    public void onBackPressed() {
+
+        if (
+                webView != null &&
+                webView.canGoBack()
+        ) {
+
+            webView.goBack();
+
+        } else {
+
+            super.onBackPressed();
+        }
+    }
 }
