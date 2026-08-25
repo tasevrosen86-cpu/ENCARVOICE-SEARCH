@@ -1,157 +1,284 @@
 package com.encarvoicesearch;
 
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ContentValues;
 import android.content.Context;
-import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.speech.RecognizerIntent;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
-import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLDecoder;
 import java.net.URLEncoder;
+
 import java.nio.charset.StandardCharsets;
+
+import java.text.SimpleDateFormat;
+
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.Set;
+
+
+/*
+ * ============================================================
+ * ENCAR AUTO CATALOG SCANNER
+ *
+ * Сканира автоматично:
+ *
+ * KIA
+ * HYUNDAI
+ * MERCEDES
+ * BMW
+ * AUDI
+ *
+ * Нива:
+ *
+ * Manufacturer
+ * ModelGroup
+ * Model
+ * Grade
+ * BadgeGroup
+ * Badge
+ * FuelType
+ *
+ * Всеки HTTP response се записва RAW във файл.
+ * ============================================================
+ */
 
 public class MainActivity extends Activity {
 
-    private static final int VOICE_REQUEST = 1001;
-    private static final int MAX_READ_ATTEMPTS = 12;
+    private static final String API =
+            "https://api.encar.com/search/car/list/general";
 
-    private WebView webView;
+    private static final String ENCAR_HOME =
+            "https://car.encar.com/list/car";
+
+
+    /*
+     * Не искам скенерът да удря Encar прекалено агресивно.
+     *
+     * 450 ms между заявките.
+     */
+    private static final long REQUEST_DELAY_MS =
+            450L;
+
+
+    /*
+     * Защита от безкраен цикъл.
+     */
+    private static final int MAX_REQUESTS =
+            3000;
+
+
     private TextView status;
-    private EditText searchInput;
+    private TextView outputView;
 
-    private final Handler handler =
-            new Handler(Looper.getMainLooper());
+    private Button startButton;
+    private Button stopButton;
 
-    private int readAttempts = 0;
+    private WebView cookieWebView;
 
-    private String lastResult = "";
-    private String lastCarUrl = "";
 
-    private final List<CarModel> catalog =
+    private volatile boolean stopRequested =
+            false;
+
+    private volatile boolean scanning =
+            false;
+
+    private volatile boolean cookieReady =
+            false;
+
+    private volatile boolean startPending =
+            false;
+
+
+    private String userAgent =
+            "Mozilla/5.0";
+
+
+    private BufferedWriter fileWriter;
+
+    private Uri downloadUri;
+
+    private String outputFileName =
+            "";
+
+    private String fallbackFilePath =
+            "";
+
+
+    /*
+     * Само структурираното обобщение държим в RAM.
+     *
+     * Огромните RAW JSON отговори отиват директно във файла.
+     */
+    private final StringBuilder summary =
+            new StringBuilder();
+
+
+    private final List<Brand> brands =
             new ArrayList<>();
 
 
     // =========================================================
-    // MODEL CATALOG
+    // DATA CLASSES
     // =========================================================
 
-    private static class Generation {
+    private static class Brand {
 
-        int fromYear;
-        int toYear;
+        String display;
+        String manufacturer;
+        String carType;
 
-        String exactModel;
-        String label;
-
-        Generation(
-                int fromYear,
-                int toYear,
-                String exactModel,
-                String label
+        Brand(
+                String display,
+                String manufacturer,
+                String carType
         ) {
 
-            this.fromYear = fromYear;
-            this.toYear = toYear;
-            this.exactModel = exactModel;
-            this.label = label;
-        }
+            this.display =
+                    display;
 
-        boolean accepts(int year) {
+            this.manufacturer =
+                    manufacturer;
 
-            return year >= fromYear &&
-                    year <= toYear;
+            this.carType =
+                    carType;
         }
     }
 
 
-    private static class CarModel {
+    private static class Task {
 
-        String brand;
-        String displayName;
+        Brand brand;
 
-        String manufacturer;
         String modelGroup;
+        String model;
 
-        String[] aliases;
+        String grade;
+        String badgeGroup;
 
-        List<Generation> generations =
-                new ArrayList<>();
+        int depth;
 
-        CarModel(
-                String brand,
-                String displayName,
-                String manufacturer,
-                String modelGroup,
-                String... aliases
+
+        Task(
+                Brand brand
         ) {
 
-            this.brand = brand;
-            this.displayName = displayName;
-            this.manufacturer = manufacturer;
-            this.modelGroup = modelGroup;
-            this.aliases = aliases;
+            this.brand =
+                    brand;
+
+            this.depth =
+                    0;
         }
 
-        CarModel generation(
-                int from,
-                int to,
-                String exactModel,
-                String label
+
+        Task copy() {
+
+            Task t =
+                    new Task(
+                            brand
+                    );
+
+            t.modelGroup =
+                    modelGroup;
+
+            t.model =
+                    model;
+
+            t.grade =
+                    grade;
+
+            t.badgeGroup =
+                    badgeGroup;
+
+            t.depth =
+                    depth;
+
+            return t;
+        }
+    }
+
+
+    private static class ApiResult {
+
+        int code;
+
+        String url;
+        String body;
+
+        ApiResult(
+                int code,
+                String url,
+                String body
         ) {
 
-            generations.add(
-                    new Generation(
-                            from,
-                            to,
-                            exactModel,
-                            label
-                    )
-            );
+            this.code =
+                    code;
 
-            return this;
+            this.url =
+                    url;
+
+            this.body =
+                    body;
         }
+    }
 
-        Generation generationFor(
-                int year
-        ) {
 
-            for (
-                    Generation generation :
-                            generations
-            ) {
+    private static class Found {
 
-                if (
-                        generation.accepts(year)
-                ) {
+        Set<String> modelGroups =
+                new LinkedHashSet<>();
 
-                    return generation;
-                }
-            }
+        Set<String> models =
+                new LinkedHashSet<>();
 
-            return null;
-        }
+        Set<String> grades =
+                new LinkedHashSet<>();
+
+        Set<String> badgeGroups =
+                new LinkedHashSet<>();
+
+        Set<String> badges =
+                new LinkedHashSet<>();
+
+        Set<String> fuels =
+                new LinkedHashSet<>();
     }
 
 
@@ -168,8 +295,81 @@ public class MainActivity extends Activity {
                 savedInstanceState
         );
 
-        initCatalog();
 
+        initBrands();
+
+        buildUi();
+
+        initCookieWebView();
+    }
+
+
+    // =========================================================
+    // BRANDS
+    // =========================================================
+
+    private void initBrands() {
+
+        brands.clear();
+
+
+        /*
+         * Korean/local branch
+         */
+        brands.add(
+                new Brand(
+                        "KIA",
+                        "기아",
+                        "Y"
+                )
+        );
+
+
+        brands.add(
+                new Brand(
+                        "HYUNDAI",
+                        "현대",
+                        "Y"
+                )
+        );
+
+
+        /*
+         * Imported branch
+         */
+        brands.add(
+                new Brand(
+                        "MERCEDES",
+                        "벤츠",
+                        "N"
+                )
+        );
+
+
+        brands.add(
+                new Brand(
+                        "BMW",
+                        "BMW",
+                        "N"
+                )
+        );
+
+
+        brands.add(
+                new Brand(
+                        "AUDI",
+                        "아우디",
+                        "N"
+                )
+        );
+    }
+
+
+    // =========================================================
+    // UI
+    // =========================================================
+
+    private void buildUi() {
 
         LinearLayout root =
                 new LinearLayout(this);
@@ -179,30 +379,47 @@ public class MainActivity extends Activity {
         );
 
 
-        searchInput =
-                new EditText(this);
+        TextView title =
+                new TextView(this);
 
-        searchInput.setHint(
-                "Например: Hyundai Santa Fe 2024 хибрид"
+        title.setText(
+                "ENCAR AUTO CATALOG SCANNER"
         );
 
-        searchInput.setTextSize(18);
+        title.setTextSize(
+                20
+        );
 
-        searchInput.setSingleLine(false);
-
-        searchInput.setMinLines(2);
-
-        searchInput.setPadding(
+        title.setPadding(
                 20,
-                15,
+                20,
                 20,
                 15
         );
 
 
-        // =====================================================
-        // TOP BUTTONS
-        // =====================================================
+        status =
+                new TextView(this);
+
+        status.setText(
+                "Подготвям Encar..."
+        );
+
+        status.setTextSize(
+                15
+        );
+
+        status.setPadding(
+                20,
+                10,
+                20,
+                10
+        );
+
+        status.setTextIsSelectable(
+                true
+        );
+
 
         LinearLayout buttons =
                 new LinearLayout(this);
@@ -212,91 +429,19 @@ public class MainActivity extends Activity {
         );
 
 
-        Button voiceButton =
+        startButton =
                 new Button(this);
 
-        voiceButton.setText(
-                "🎤 ГЛАС"
+        startButton.setText(
+                "▶ SCAN ALL"
         );
 
 
-        Button searchButton =
+        stopButton =
                 new Button(this);
 
-        searchButton.setText(
-                "🔎 ТЪРСИ"
-        );
-
-
-        LinearLayout.LayoutParams buttonParams =
-                new LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        1
-                );
-
-
-        buttons.addView(
-                voiceButton,
-                buttonParams
-        );
-
-        buttons.addView(
-                searchButton,
-                buttonParams
-        );
-
-
-        // =====================================================
-        // STATUS
-        // =====================================================
-
-        status =
-                new TextView(this);
-
-        status.setText(
-                "Готово"
-        );
-
-        status.setTextSize(14);
-
-        status.setPadding(
-                20,
-                15,
-                20,
-                15
-        );
-
-        status.setTextIsSelectable(
-                true
-        );
-
-
-        // =====================================================
-        // LOWER BUTTONS
-        // =====================================================
-
-        LinearLayout tools =
-                new LinearLayout(this);
-
-        tools.setOrientation(
-                LinearLayout.HORIZONTAL
-        );
-
-
-        Button readButton =
-                new Button(this);
-
-        readButton.setText(
-                "ПЪРВА ОБЯВА"
-        );
-
-
-        Button openButton =
-                new Button(this);
-
-        openButton.setText(
-                "ОТВОРИ"
+        stopButton.setText(
+                "■ STOP"
         );
 
 
@@ -308,7 +453,7 @@ public class MainActivity extends Activity {
         );
 
 
-        LinearLayout.LayoutParams toolParams =
+        LinearLayout.LayoutParams bp =
                 new LinearLayout.LayoutParams(
                         0,
                         ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -316,61 +461,160 @@ public class MainActivity extends Activity {
                 );
 
 
-        tools.addView(
-                readButton,
-                toolParams
+        buttons.addView(
+                startButton,
+                bp
         );
 
-        tools.addView(
-                openButton,
-                toolParams
+        buttons.addView(
+                stopButton,
+                bp
         );
 
-        tools.addView(
+        buttons.addView(
                 copyButton,
-                toolParams
+                bp
         );
 
 
-        // =====================================================
-        // WEBVIEW
-        // =====================================================
+        outputView =
+                new TextView(this);
 
-        webView =
+        outputView.setTextSize(
+                13
+        );
+
+        outputView.setTextIsSelectable(
+                true
+        );
+
+        outputView.setPadding(
+                20,
+                15,
+                20,
+                30
+        );
+
+
+        ScrollView scroll =
+                new ScrollView(this);
+
+        scroll.addView(
+                outputView
+        );
+
+
+        cookieWebView =
                 new WebView(this);
 
-
-        WebSettings settings =
-                webView.getSettings();
-
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setLoadsImagesAutomatically(true);
-        settings.setUseWideViewPort(true);
-        settings.setLoadWithOverviewMode(true);
-
-
-        CookieManager
-                .getInstance()
-                .setAcceptCookie(true);
-
-
-        CookieManager
-                .getInstance()
-                .setAcceptThirdPartyCookies(
-                        webView,
-                        true
-                );
-
-
-        webView.addJavascriptInterface(
-                new CarReader(),
-                "AndroidCarReader"
+        cookieWebView.setVisibility(
+                View.INVISIBLE
         );
 
 
-        webView.setWebViewClient(
+        root.addView(
+                title
+        );
+
+        root.addView(
+                status
+        );
+
+        root.addView(
+                buttons
+        );
+
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1
+                )
+        );
+
+
+        root.addView(
+                cookieWebView,
+                new LinearLayout.LayoutParams(
+                        1,
+                        1
+                )
+        );
+
+
+        setContentView(
+                root
+        );
+
+
+        startButton.setOnClickListener(
+                v -> startAll()
+        );
+
+
+        stopButton.setOnClickListener(
+                v -> {
+
+                    stopRequested =
+                            true;
+
+                    status.setText(
+                            "STOP поискан. Завършвам текущата заявка..."
+                    );
+                }
+        );
+
+
+        copyButton.setOnClickListener(
+                v -> copySummary()
+        );
+    }
+
+
+    // =========================================================
+    // COOKIE WEBVIEW
+    // =========================================================
+
+    private void initCookieWebView() {
+
+        WebSettings settings =
+                cookieWebView.getSettings();
+
+
+        settings.setJavaScriptEnabled(
+                true
+        );
+
+        settings.setDomStorageEnabled(
+                true
+        );
+
+        settings.setDatabaseEnabled(
+                true
+        );
+
+
+        userAgent =
+                settings.getUserAgentString();
+
+
+        CookieManager manager =
+                CookieManager.getInstance();
+
+
+        manager.setAcceptCookie(
+                true
+        );
+
+
+        manager.setAcceptThirdPartyCookies(
+                cookieWebView,
+                true
+        );
+
+
+        cookieWebView.setWebViewClient(
                 new WebViewClient() {
 
                     @Override
@@ -384,770 +628,1062 @@ public class MainActivity extends Activity {
                                 url
                         );
 
+
+                        CookieManager
+                                .getInstance()
+                                .flush();
+
+
+                        cookieReady =
+                                true;
+
+
+                        status.setText(
+                                "Encar е готов.\n" +
+                                "Натисни SCAN ALL."
+                        );
+
+
                         if (
-                                url != null
-                                        &&
-                                url.contains(
-                                        "car.encar.com/list/car"
-                                )
+                                startPending
                         ) {
 
-                            status.setText(
-                                    "Резултатите са заредени.\n" +
-                                    "Търся първата реална обява..."
-                            );
+                            startPending =
+                                    false;
 
-                            handler.postDelayed(
-                                    () -> startReading(),
-                                    1800
-                            );
+                            startAll();
                         }
                     }
                 }
         );
 
 
-        // =====================================================
-        // ADD UI
-        // =====================================================
-
-        root.addView(
-                searchInput
-        );
-
-        root.addView(
-                buttons
-        );
-
-        root.addView(
-                status
-        );
-
-        root.addView(
-                tools
-        );
-
-        root.addView(
-                webView,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        0,
-                        1
-                )
-        );
-
-
-        setContentView(
-                root
-        );
-
-
-        // =====================================================
-        // BUTTON EVENTS
-        // =====================================================
-
-        voiceButton.setOnClickListener(
-                v -> startVoice()
-        );
-
-
-        searchButton.setOnClickListener(
-                v -> searchFromInput()
-        );
-
-
-        readButton.setOnClickListener(
-                v -> startReading()
-        );
-
-
-        openButton.setOnClickListener(
-                v -> openFirstCar()
-        );
-
-
-        copyButton.setOnClickListener(
-                v -> copyResult()
+        cookieWebView.loadUrl(
+                ENCAR_HOME
         );
     }
 
 
     // =========================================================
-    // CATALOG
+    // START
     // =========================================================
 
-    private void initCatalog() {
+    private void startAll() {
 
-        catalog.clear();
-
-
-        // =====================================================
-        // KIA
-        // =====================================================
-
-        CarModel sorento =
-                new CarModel(
-                        "KIA",
-                        "Kia Sorento",
-                        "기아",
-                        "쏘렌토",
-                        "kia sorento",
-                        "киа соренто",
-                        "кия соренто",
-                        "sorento",
-                        "соренто"
-                );
-
-
-        /*
-         * ПОТВЪРДЕН ПРОФИЛ
-         */
-        sorento.generation(
-                2023,
-                2099,
-                "더 뉴 쏘렌토 4세대",
-                "The New Sorento 4th"
-        );
-
-
-        /*
-         * За по-старите години:
-         * ModelGroup + Year.
-         */
-        sorento.generation(
-                2000,
-                2022,
-                null,
-                "Sorento"
-        );
-
-
-        catalog.add(
-                sorento
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia Sportage",
-                        "기아",
-                        "스포티지",
-                        "kia sportage",
-                        "киа спортидж",
-                        "киа спортиж",
-                        "sportage",
-                        "спортидж",
-                        "спортиж"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia Carnival",
-                        "기아",
-                        "카니발",
-                        "kia carnival",
-                        "киа карнивал",
-                        "carnival",
-                        "карнивал"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia Seltos",
-                        "기아",
-                        "셀토스",
-                        "kia seltos",
-                        "seltos",
-                        "селтос"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia Niro",
-                        "기아",
-                        "니로",
-                        "kia niro",
-                        "niro",
-                        "ниро"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia Mohave",
-                        "기아",
-                        "모하비",
-                        "kia mohave",
-                        "mohave",
-                        "мохаве"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia EV6",
-                        "기아",
-                        "EV6",
-                        "kia ev6",
-                        "ev6"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia EV9",
-                        "기아",
-                        "EV9",
-                        "kia ev9",
-                        "ev9"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia K5",
-                        "기아",
-                        "K5",
-                        "kia k5",
-                        "k5"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia K8",
-                        "기아",
-                        "K8",
-                        "kia k8",
-                        "k8"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "KIA",
-                        "Kia K9",
-                        "기아",
-                        "K9",
-                        "kia k9",
-                        "k9"
-                )
-        );
-
-
-        // =====================================================
-        // HYUNDAI PALISADE
-        // =====================================================
-
-        CarModel palisade =
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Palisade",
-                        "현대",
-                        "팰리세이드",
-                        "hyundai palisade",
-                        "хюндай палисейд",
-                        "хендай палисейд",
-                        "хундай палисейд",
-                        "palisade",
-                        "палисейд"
-                );
-
-
-        /*
-         * ПОТВЪРДЕН РАБОТЕЩ ПРОФИЛ
-         */
-        palisade.generation(
-                2025,
-                2099,
-                "팰리세이드 (LX3_)",
-                "Palisade LX3"
-        );
-
-
-        /*
-         * ПОТВЪРДЕН РАБОТЕЩ ПРОФИЛ
-         */
-        palisade.generation(
-                2022,
-                2024,
-                "더 뉴 팰리세이드",
-                "The New Palisade"
-        );
-
-
-        palisade.generation(
-                2018,
-                2021,
-                "팰리세이드",
-                "Palisade"
-        );
-
-
-        catalog.add(
-                palisade
-        );
-
-
-        // =====================================================
-        // HYUNDAI SANTA FE
-        // =====================================================
-
-        CarModel santaFe =
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Santa Fe",
-                        "현대",
-                        "싼타페",
-                        "hyundai santa fe",
-                        "hyundai santafe",
-                        "хюндай санта фе",
-                        "хендай санта фе",
-                        "santa fe",
-                        "santafe",
-                        "санта фе"
-                );
-
-
-        /*
-         * Диапазоните са от показания Encar каталог.
-         * exactModel нарочно остава null,
-         * докато не бъде потвърден от scanner.
-         */
-        santaFe.generation(
-                2023,
-                2099,
-                null,
-                "Santa Fe MX5"
-        );
-
-        santaFe.generation(
-                2020,
-                2022,
-                null,
-                "The New Santa Fe"
-        );
-
-        santaFe.generation(
-                2018,
-                2019,
-                null,
-                "Santa Fe TM"
-        );
-
-        santaFe.generation(
-                2015,
-                2017,
-                null,
-                "Santa Fe Prime"
-        );
-
-        santaFe.generation(
-                2012,
-                2014,
-                null,
-                "Santa Fe DM"
-        );
-
-
-        catalog.add(
-                santaFe
-        );
-
-
-        // =====================================================
-        // HYUNDAI TUCSON
-        // =====================================================
-
-        CarModel tucson =
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Tucson",
-                        "현대",
-                        "투싼",
-                        "hyundai tucson",
-                        "хюндай тусон",
-                        "хендай тусон",
-                        "tucson",
-                        "тусон"
-                );
-
-
-        tucson.generation(
-                2023,
-                2099,
-                null,
-                "The New Tucson NX4"
-        );
-
-        tucson.generation(
-                2020,
-                2022,
-                null,
-                "Tucson NX4"
-        );
-
-        tucson.generation(
-                2015,
-                2019,
-                null,
-                "All New Tucson"
-        );
-
-        tucson.generation(
-                2013,
-                2014,
-                null,
-                "New Tucson ix"
-        );
-
-
-        catalog.add(
-                tucson
-        );
-
-
-        // =====================================================
-        // HYUNDAI AVANTE
-        // =====================================================
-
-        CarModel avante =
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Avante",
-                        "현대",
-                        "아반떼",
-                        "hyundai avante",
-                        "hyundai elantra",
-                        "avante",
-                        "elantra",
-                        "авантe",
-                        "аванте",
-                        "елантра"
-                );
-
-
-        avante.generation(
-                2023,
-                2099,
-                null,
-                "The New Avante CN7"
-        );
-
-        avante.generation(
-                2020,
-                2022,
-                null,
-                "Avante CN7"
-        );
-
-        avante.generation(
-                2018,
-                2019,
-                null,
-                "The New Avante"
-        );
-
-        avante.generation(
-                2015,
-                2017,
-                null,
-                "Avante AD"
-        );
-
-
-        catalog.add(
-                avante
-        );
-
-
-        // =====================================================
-        // HYUNDAI SONATA
-        // =====================================================
-
-        CarModel sonata =
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Sonata",
-                        "현대",
-                        "쏘나타",
-                        "hyundai sonata",
-                        "хюндай соната",
-                        "sonata",
-                        "соната"
-                );
-
-
-        sonata.generation(
-                2023,
-                2099,
-                null,
-                "Sonata The Edge DN8"
-        );
-
-        sonata.generation(
-                2019,
-                2022,
-                null,
-                "Sonata DN8"
-        );
-
-        sonata.generation(
-                2017,
-                2018,
-                null,
-                "Sonata New Rise"
-        );
-
-        sonata.generation(
-                2014,
-                2016,
-                null,
-                "LF Sonata"
-        );
-
-
-        catalog.add(
-                sonata
-        );
-
-
-        // =====================================================
-        // HYUNDAI GRANDEUR
-        // =====================================================
-
-        CarModel grandeur =
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Grandeur",
-                        "현대",
-                        "그랜저",
-                        "hyundai grandeur",
-                        "grandeur",
-                        "грандер",
-                        "грандьор",
-                        "грандеур"
-                );
-
-
-        grandeur.generation(
-                2022,
-                2099,
-                null,
-                "Grandeur GN7"
-        );
-
-        grandeur.generation(
-                2019,
-                2021,
-                null,
-                "The New Grandeur IG"
-        );
-
-        grandeur.generation(
-                2016,
-                2018,
-                null,
-                "Grandeur IG"
-        );
-
-
-        catalog.add(
-                grandeur
-        );
-
-
-        // =====================================================
-        // OTHER HYUNDAI
-        // =====================================================
-
-        catalog.add(
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Kona",
-                        "현대",
-                        "코나",
-                        "hyundai kona",
-                        "kona",
-                        "кона"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Staria",
-                        "현대",
-                        "스타리아",
-                        "hyundai staria",
-                        "staria",
-                        "стария",
-                        "стария хюндай"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Ioniq 5",
-                        "현대",
-                        "아이오닉5",
-                        "hyundai ioniq 5",
-                        "ioniq 5",
-                        "ioniq5",
-                        "йоник 5",
-                        "ионик 5"
-                )
-        );
-
-
-        catalog.add(
-                new CarModel(
-                        "HYUNDAI",
-                        "Hyundai Ioniq 6",
-                        "현대",
-                        "아이오닉6",
-                        "hyundai ioniq 6",
-                        "ioniq 6",
-                        "ioniq6",
-                        "йоник 6",
-                        "ионик 6"
-                )
-        );
-    }
-
-
-    // =========================================================
-    // VOICE
-    // =========================================================
-
-    private void startVoice() {
-
-        Intent intent =
-                new Intent(
-                        RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-                );
-
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-        );
-
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE,
-                "bg-BG"
-        );
-
-
-        intent.putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                "Кажи марка, модел, година и гориво"
-        );
-
-
-        try {
-
-            startActivityForResult(
-                    intent,
-                    VOICE_REQUEST
-            );
-
-        } catch (
-                ActivityNotFoundException e
+        if (
+                scanning
         ) {
 
             Toast.makeText(
                     this,
-                    "Няма гласово разпознаване",
-                    Toast.LENGTH_LONG
+                    "Скенерът вече работи.",
+                    Toast.LENGTH_SHORT
             ).show();
+
+            return;
+        }
+
+
+        if (
+                !cookieReady
+        ) {
+
+            startPending =
+                    true;
+
+            status.setText(
+                    "Изчаквам Encar да се зареди..."
+            );
+
+            cookieWebView.loadUrl(
+                    ENCAR_HOME
+            );
+
+            return;
+        }
+
+
+        stopRequested =
+                false;
+
+        scanning =
+                true;
+
+
+        summary.setLength(
+                0
+        );
+
+
+        outputView.setText(
+                ""
+        );
+
+
+        startButton.setEnabled(
+                false
+        );
+
+
+        new Thread(
+                this::runScan
+        ).start();
+    }
+
+
+    // =========================================================
+    // MAIN SCAN
+    // =========================================================
+
+    private void runScan() {
+
+        ArrayDeque<Task> queue =
+                new ArrayDeque<>();
+
+
+        Set<String> seenQueries =
+                new LinkedHashSet<>();
+
+
+        int requestCount =
+                0;
+
+
+        try {
+
+            openOutputFile();
+
+
+            writeHeader();
+
+
+            /*
+             * Първа задача:
+             * една заявка за всяка марка.
+             */
+            for (
+                    Brand brand :
+                    brands
+            ) {
+
+                queue.add(
+                        new Task(
+                                brand
+                        )
+                );
+            }
+
+
+            while (
+                    !queue.isEmpty()
+                            &&
+                    !stopRequested
+                            &&
+                    requestCount
+                            <
+                    MAX_REQUESTS
+            ) {
+
+                Task task =
+                        queue.removeFirst();
+
+
+                String q =
+                        buildQ(
+                                task
+                        );
+
+
+                if (
+                        seenQueries.contains(
+                                q
+                        )
+                ) {
+
+                    continue;
+                }
+
+
+                seenQueries.add(
+                        q
+                );
+
+
+                requestCount++;
+
+
+                final int currentRequest =
+                        requestCount;
+
+
+                showProgress(
+                        "Заявка "
+                                +
+                        currentRequest
+                                +
+                        "\n"
+                                +
+                        taskDescription(
+                                task
+                        )
+                                +
+                        "\n"
+                                +
+                        "Опашка: "
+                                +
+                        queue.size()
+                );
+
+
+                ApiResult response =
+                        request(
+                                q
+                        );
+
+
+                writeRawResponse(
+                        currentRequest,
+                        task,
+                        q,
+                        response
+                );
+
+
+                if (
+                        response.code
+                                ==
+                        200
+                ) {
+
+                    Found found =
+                            extractCatalog(
+                                    response.body
+                            );
+
+
+                    writeFound(
+                            task,
+                            found
+                    );
+
+
+                    /*
+                     * =================================================
+                     * LEVEL 0
+                     * BRAND → MODEL GROUP
+                     * =================================================
+                     */
+                    if (
+                            task.modelGroup
+                                    ==
+                            null
+                                    &&
+                            task.model
+                                    ==
+                            null
+                    ) {
+
+                        for (
+                                String group :
+                                found.modelGroups
+                        ) {
+
+                            Task child =
+                                    task.copy();
+
+
+                            child.modelGroup =
+                                    group;
+
+                            child.depth =
+                                    1;
+
+
+                            queue.addLast(
+                                    child
+                            );
+                        }
+
+
+                        /*
+                         * Някои модели може да бъдат върнати
+                         * директно без ModelGroup.
+                         */
+                        if (
+                                found.modelGroups.isEmpty()
+                        ) {
+
+                            for (
+                                    String model :
+                                    found.models
+                            ) {
+
+                                Task child =
+                                        task.copy();
+
+
+                                child.model =
+                                        model;
+
+                                child.depth =
+                                        2;
+
+
+                                queue.addLast(
+                                        child
+                                );
+                            }
+                        }
+                    }
+
+
+                    /*
+                     * =================================================
+                     * MODEL GROUP → MODEL
+                     * =================================================
+                     */
+                    else if (
+                            task.modelGroup
+                                    !=
+                            null
+                                    &&
+                            task.model
+                                    ==
+                            null
+                    ) {
+
+                        for (
+                                String model :
+                                found.models
+                        ) {
+
+                            Task child =
+                                    task.copy();
+
+
+                            child.model =
+                                    model;
+
+                            child.depth =
+                                    2;
+
+
+                            queue.addLast(
+                                    child
+                            );
+                        }
+                    }
+
+
+                    /*
+                     * =================================================
+                     * MODEL → GRADE / BADGE GROUP
+                     * =================================================
+                     */
+                    else if (
+                            task.model
+                                    !=
+                            null
+                                    &&
+                            task.grade
+                                    ==
+                            null
+                                    &&
+                            task.badgeGroup
+                                    ==
+                            null
+                    ) {
+
+                        for (
+                                String grade :
+                                found.grades
+                        ) {
+
+                            Task child =
+                                    task.copy();
+
+
+                            child.grade =
+                                    grade;
+
+                            child.depth =
+                                    3;
+
+
+                            queue.addLast(
+                                    child
+                            );
+                        }
+
+
+                        for (
+                                String badgeGroup :
+                                found.badgeGroups
+                        ) {
+
+                            Task child =
+                                    task.copy();
+
+
+                            child.badgeGroup =
+                                    badgeGroup;
+
+                            child.depth =
+                                    3;
+
+
+                            queue.addLast(
+                                    child
+                            );
+                        }
+                    }
+
+
+                    /*
+                     * GRADE / BadgeGroup response също се записва RAW.
+                     *
+                     * Не продължаваме безкрайно по Badge,
+                     * защото самият response съдържа Badge стойностите.
+                     */
+                }
+
+
+                else {
+
+                    appendSummary(
+                            "HTTP_ERROR | "
+                                    +
+                            taskDescription(
+                                    task
+                            )
+                                    +
+                            " | HTTP "
+                                    +
+                            response.code
+                    );
+
+
+                    /*
+                     * Ако Encar спре достъпа,
+                     * не се опитваме да заобикаляме защитата.
+                     */
+                    if (
+                            response.code
+                                    ==
+                            403
+                                    ||
+                            response.code
+                                    ==
+                            407
+                                    ||
+                            response.code
+                                    ==
+                            429
+                    ) {
+
+                        stopRequested =
+                                true;
+
+
+                        appendSummary(
+                                "SCAN_STOPPED_BY_HTTP_"
+                                        +
+                                response.code
+                        );
+
+
+                        break;
+                    }
+                }
+
+
+                try {
+
+                    Thread.sleep(
+                            REQUEST_DELAY_MS
+                    );
+
+                } catch (
+                        InterruptedException ignored
+                ) {
+
+                }
+            }
+
+
+            writeLine(
+                    "\n\n===== SCAN FINISHED =====\n"
+            );
+
+
+            writeLine(
+                    "REQUESTS="
+                            +
+                    requestCount
+                            +
+                    "\n"
+            );
+
+
+            writeLine(
+                    "STOP_REQUESTED="
+                            +
+                    stopRequested
+                            +
+                    "\n"
+            );
+
+
+            writeLine(
+                    "=========================\n"
+            );
+
+
+            closeOutputFile();
+
+
+            final int finalRequestCount =
+                    requestCount;
+
+
+            runOnUiThread(
+                    () -> {
+
+                        scanning =
+                                false;
+
+
+                        startButton.setEnabled(
+                                true
+                        );
+
+
+                        status.setText(
+                                "СКАНЪТ ЗАВЪРШИ ✅\n"
+                                        +
+                                "Заявки: "
+                                        +
+                                finalRequestCount
+                                        +
+                                "\n"
+                                        +
+                                getSavedLocation()
+                        );
+
+
+                        outputView.setText(
+                                summary.toString()
+                        );
+                    }
+            );
+
+
+        } catch (
+                Exception e
+        ) {
+
+            try {
+
+                writeLine(
+                        "\nFATAL_ERROR="
+                                +
+                        e.toString()
+                                +
+                        "\n"
+                );
+
+            } catch (
+                    Exception ignored
+            ) {
+
+            }
+
+
+            closeOutputFile();
+
+
+            runOnUiThread(
+                    () -> {
+
+                        scanning =
+                                false;
+
+
+                        startButton.setEnabled(
+                                true
+                        );
+
+
+                        status.setText(
+                                "ГРЕШКА:\n"
+                                        +
+                                e.getClass()
+                                        .getSimpleName()
+                                        +
+                                "\n"
+                                        +
+                                e.getMessage()
+                                        +
+                                "\n\n"
+                                        +
+                                getSavedLocation()
+                        );
+                    }
+            );
         }
     }
 
 
-    @Override
-    @SuppressWarnings("deprecation")
-    protected void onActivityResult(
-            int requestCode,
-            int resultCode,
-            Intent data
+    // =========================================================
+    // BUILD Q
+    // =========================================================
+
+    private String buildQ(
+            Task task
     ) {
 
-        super.onActivityResult(
-                requestCode,
-                resultCode,
-                data
+        StringBuilder q =
+                new StringBuilder();
+
+
+        q.append(
+                "(And.Hidden.N."
+        );
+
+
+        q.append(
+                "_.CarType."
+        );
+
+
+        q.append(
+                task.brand.carType
+        );
+
+
+        q.append(
+                "."
+        );
+
+
+        q.append(
+                "_.Manufacturer."
+        );
+
+
+        q.append(
+                task.brand.manufacturer
+        );
+
+
+        q.append(
+                "."
         );
 
 
         if (
-                requestCode == VOICE_REQUEST
-                        &&
-                resultCode == RESULT_OK
-                        &&
-                data != null
+                task.modelGroup
+                        !=
+                null
         ) {
 
-            ArrayList<String> results =
-                    data.getStringArrayListExtra(
-                            RecognizerIntent.EXTRA_RESULTS
+            q.append(
+                    "_.ModelGroup."
+            );
+
+
+            q.append(
+                    task.modelGroup
+            );
+
+
+            q.append(
+                    "."
+            );
+        }
+
+
+        if (
+                task.model
+                        !=
+                null
+        ) {
+
+            q.append(
+                    "_.Model."
+            );
+
+
+            q.append(
+                    task.model
+            );
+
+
+            q.append(
+                    "."
+            );
+        }
+
+
+        if (
+                task.grade
+                        !=
+                null
+        ) {
+
+            q.append(
+                    "_.Grade."
+            );
+
+
+            q.append(
+                    task.grade
+            );
+
+
+            q.append(
+                    "."
+            );
+        }
+
+
+        if (
+                task.badgeGroup
+                        !=
+                null
+        ) {
+
+            q.append(
+                    "_.BadgeGroup."
+            );
+
+
+            q.append(
+                    task.badgeGroup
+            );
+
+
+            q.append(
+                    "."
+            );
+        }
+
+
+        q.append(
+                ")"
+        );
+
+
+        return q.toString();
+    }
+
+
+    // =========================================================
+    // HTTP REQUEST
+    // =========================================================
+
+    private ApiResult request(
+            String q
+    ) {
+
+        HttpURLConnection connection =
+                null;
+
+
+        try {
+
+            String url =
+                    API
+                            +
+                    "?count=true"
+                            +
+                    "&q="
+                            +
+                    encode(
+                            q
+                    )
+                            +
+                    "&sr="
+                            +
+                    encode(
+                            "|ModifiedDate|0|1"
+                    )
+                            +
+                    "&inav="
+                            +
+                    encode(
+                            "|Metadata|Sort"
+                    );
+
+
+            connection =
+                    (HttpURLConnection)
+                            new URL(
+                                    url
+                            )
+                                    .openConnection();
+
+
+            connection.setRequestMethod(
+                    "GET"
+            );
+
+
+            connection.setConnectTimeout(
+                    20000
+            );
+
+
+            connection.setReadTimeout(
+                    30000
+            );
+
+
+            connection.setInstanceFollowRedirects(
+                    true
+            );
+
+
+            connection.setRequestProperty(
+                    "Accept",
+                    "application/json, text/plain, */*"
+            );
+
+
+            connection.setRequestProperty(
+                    "Accept-Language",
+                    "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
+            );
+
+
+            connection.setRequestProperty(
+                    "User-Agent",
+                    userAgent == null
+                            ?
+                    "Mozilla/5.0"
+                            :
+                    userAgent
+            );
+
+
+            connection.setRequestProperty(
+                    "Referer",
+                    ENCAR_HOME
+            );
+
+
+            String cookies =
+                    collectCookies();
+
+
+            if (
+                    !cookies.isEmpty()
+            ) {
+
+                connection.setRequestProperty(
+                        "Cookie",
+                        cookies
+                );
+            }
+
+
+            int code =
+                    connection.getResponseCode();
+
+
+            InputStream stream =
+                    code >= 200
+                            &&
+                    code < 400
+                            ?
+                    connection.getInputStream()
+                            :
+                    connection.getErrorStream();
+
+
+            String body =
+                    readAll(
+                            stream
+                    );
+
+
+            return new ApiResult(
+                    code,
+                    url,
+                    body
+            );
+
+
+        } catch (
+                Exception e
+        ) {
+
+            return new ApiResult(
+                    -1,
+                    "",
+                    e.getClass()
+                            .getSimpleName()
+                            +
+                    ": "
+                            +
+                    (
+                            e.getMessage()
+                                    ==
+                            null
+                                    ?
+                            ""
+                                    :
+                            e.getMessage()
+                    )
+            );
+
+
+        } finally {
+
+            if (
+                    connection
+                            !=
+                    null
+            ) {
+
+                connection.disconnect();
+            }
+        }
+    }
+
+
+    // =========================================================
+    // COOKIES
+    // =========================================================
+
+    private String collectCookies() {
+
+        CookieManager manager =
+                CookieManager.getInstance();
+
+
+        Map<String, String> result =
+                new LinkedHashMap<>();
+
+
+        addCookies(
+                result,
+                manager.getCookie(
+                        "https://car.encar.com"
+                )
+        );
+
+
+        addCookies(
+                result,
+                manager.getCookie(
+                        "https://m.encar.com"
+                )
+        );
+
+
+        addCookies(
+                result,
+                manager.getCookie(
+                        "https://api.encar.com"
+                )
+        );
+
+
+        StringBuilder output =
+                new StringBuilder();
+
+
+        for (
+                Map.Entry<String, String> entry :
+                result.entrySet()
+        ) {
+
+            if (
+                    output.length()
+                            >
+                    0
+            ) {
+
+                output.append(
+                        "; "
+                );
+            }
+
+
+            output.append(
+                    entry.getKey()
+            );
+
+
+            output.append(
+                    "="
+            );
+
+
+            output.append(
+                    entry.getValue()
+            );
+        }
+
+
+        return output.toString();
+    }
+
+
+    private void addCookies(
+            Map<String, String> map,
+            String cookieText
+    ) {
+
+        if (
+                cookieText
+                        ==
+                null
+                        ||
+                cookieText.trim()
+                        .isEmpty()
+        ) {
+
+            return;
+        }
+
+
+        String[] parts =
+                cookieText.split(
+                        ";"
+                );
+
+
+        for (
+                String part :
+                parts
+        ) {
+
+            String p =
+                    part.trim();
+
+
+            int index =
+                    p.indexOf(
+                            '='
                     );
 
 
             if (
-                    results != null
-                            &&
-                    !results.isEmpty()
+                    index
+                            >
+                    0
             ) {
 
-                String text =
-                        results.get(0);
-
-
-                /*
-                 * 20 25 -> 2025
-                 */
-                text =
-                        text.replaceAll(
-                                "\\b20\\s+(\\d{2})\\b",
-                                "20$1"
-                        );
-
-
-                searchInput.setText(
-                        text
-                );
-
-
-                searchInput.setSelection(
-                        searchInput
-                                .getText()
-                                .length()
+                map.put(
+                        p.substring(
+                                0,
+                                index
+                        ),
+                        p.substring(
+                                index + 1
+                        )
                 );
             }
         }
@@ -1155,142 +1691,737 @@ public class MainActivity extends Activity {
 
 
     // =========================================================
-    // SEARCH INPUT
+    // EXTRACT CATALOG
     // =========================================================
 
-    private void searchFromInput() {
+    private Found extractCatalog(
+            String body
+    ) {
 
-        String original =
-                searchInput
-                        .getText()
-                        .toString()
-                        .trim();
+        Found found =
+                new Found();
 
 
         if (
-                original.isEmpty()
+                body
+                        ==
+                null
+                        ||
+                body.isEmpty()
         ) {
 
-            status.setText(
-                    "Кажи или напиши автомобил."
-            );
+            return found;
+        }
+
+
+        /*
+         * 1.
+         * Сканираме всички RAW strings за Encar filter tokens.
+         */
+        scanString(
+                body,
+                found
+        );
+
+
+        /*
+         * 2.
+         * Ако е JSON, обхождаме цялото дърво.
+         */
+        try {
+
+            String trimmed =
+                    body.trim();
+
+
+            if (
+                    trimmed.startsWith(
+                            "{"
+                    )
+            ) {
+
+                walkJson(
+                        new JSONObject(
+                                trimmed
+                        ),
+                        null,
+                        found
+                );
+
+            } else if (
+                    trimmed.startsWith(
+                            "["
+                    )
+            ) {
+
+                walkJson(
+                        new JSONArray(
+                                trimmed
+                        ),
+                        null,
+                        found
+                );
+            }
+
+        } catch (
+                Exception ignored
+        ) {
+
+        }
+
+
+        cleanupSet(
+                found.modelGroups
+        );
+
+        cleanupSet(
+                found.models
+        );
+
+        cleanupSet(
+                found.grades
+        );
+
+        cleanupSet(
+                found.badgeGroups
+        );
+
+        cleanupSet(
+                found.badges
+        );
+
+        cleanupSet(
+                found.fuels
+        );
+
+
+        return found;
+    }
+
+
+    // =========================================================
+    // JSON WALKER
+    // =========================================================
+
+    private void walkJson(
+            Object node,
+            String context,
+            Found found
+    ) {
+
+        try {
+
+            if (
+                    node
+                            instanceof
+                    JSONObject
+            ) {
+
+                JSONObject object =
+                        (JSONObject)
+                                node;
+
+
+                JSONArray names =
+                        object.names();
+
+
+                if (
+                        names
+                                ==
+                        null
+                ) {
+
+                    return;
+                }
+
+
+                /*
+                 * Проверяваме дали object съдържа
+                 * поле със стойност например "ModelGroup".
+                 */
+                String declaredType =
+                        detectDeclaredType(
+                                object
+                        );
+
+
+                for (
+                        int i = 0;
+                        i < names.length();
+                        i++
+                ) {
+
+                    String key =
+                            names.optString(
+                                    i
+                            );
+
+
+                    Object value =
+                            object.opt(
+                                    key
+                            );
+
+
+                    String newContext =
+                            context;
+
+
+                    if (
+                            isCatalogType(
+                                    key
+                            )
+                    ) {
+
+                        newContext =
+                                normalizeType(
+                                        key
+                                );
+                    }
+
+
+                    if (
+                            value
+                                    instanceof
+                            String
+                    ) {
+
+                        String text =
+                                (String)
+                                        value;
+
+
+                        scanString(
+                                text,
+                                found
+                        );
+
+
+                        /*
+                         * Ако key е директно:
+                         *
+                         * ModelGroup : "쏘렌토"
+                         */
+                        if (
+                                isCatalogType(
+                                        key
+                                )
+                        ) {
+
+                            addByType(
+                                    normalizeType(
+                                            key
+                                    ),
+                                    text,
+                                    found
+                            );
+                        }
+
+
+                        /*
+                         * Ако сме вътре в ModelGroup block
+                         * и имаме Name/Value/Text/Label.
+                         */
+                        if (
+                                newContext
+                                        !=
+                                null
+                                        &&
+                                isNameField(
+                                        key
+                                )
+                        ) {
+
+                            addByType(
+                                    newContext,
+                                    text,
+                                    found
+                            );
+                        }
+
+
+                        /*
+                         * Например:
+                         *
+                         * Type = Model
+                         * Value = 더 뉴 쏘렌토 4세대
+                         */
+                        if (
+                                declaredType
+                                        !=
+                                null
+                                        &&
+                                isNameField(
+                                        key
+                                )
+                        ) {
+
+                            addByType(
+                                    declaredType,
+                                    text,
+                                    found
+                            );
+                        }
+
+
+                    } else if (
+                            value
+                                    instanceof
+                            JSONObject
+                                    ||
+                            value
+                                    instanceof
+                            JSONArray
+                    ) {
+
+                        walkJson(
+                                value,
+                                newContext,
+                                found
+                        );
+                    }
+                }
+
+
+            } else if (
+                    node
+                            instanceof
+                    JSONArray
+            ) {
+
+                JSONArray array =
+                        (JSONArray)
+                                node;
+
+
+                for (
+                        int i = 0;
+                        i < array.length();
+                        i++
+                ) {
+
+                    Object child =
+                            array.opt(
+                                    i
+                            );
+
+
+                    if (
+                            child
+                                    instanceof
+                            JSONObject
+                                    ||
+                            child
+                                    instanceof
+                            JSONArray
+                    ) {
+
+                        walkJson(
+                                child,
+                                context,
+                                found
+                        );
+
+
+                    } else if (
+                            child
+                                    instanceof
+                            String
+                    ) {
+
+                        String text =
+                                (String)
+                                        child;
+
+
+                        scanString(
+                                text,
+                                found
+                        );
+
+
+                        if (
+                                context
+                                        !=
+                                null
+                        ) {
+
+                            addByType(
+                                    context,
+                                    text,
+                                    found
+                            );
+                        }
+                    }
+                }
+            }
+
+        } catch (
+                Exception ignored
+        ) {
+
+        }
+    }
+
+
+    // =========================================================
+    // DECLARED TYPE
+    // =========================================================
+
+    private String detectDeclaredType(
+            JSONObject object
+    ) {
+
+        JSONArray names =
+                object.names();
+
+
+        if (
+                names
+                        ==
+                null
+        ) {
+
+            return null;
+        }
+
+
+        for (
+                int i = 0;
+                i < names.length();
+                i++
+        ) {
+
+            String key =
+                    names.optString(
+                            i
+                    );
+
+
+            Object value =
+                    object.opt(
+                            key
+                    );
+
+
+            if (
+                    value
+                            instanceof
+                    String
+            ) {
+
+                String text =
+                        (String)
+                                value;
+
+
+                if (
+                        isCatalogType(
+                                text
+                        )
+                ) {
+
+                    return normalizeType(
+                            text
+                    );
+                }
+            }
+        }
+
+
+        return null;
+    }
+
+
+    // =========================================================
+    // RAW STRING SCANNER
+    // =========================================================
+
+    private void scanString(
+            String raw,
+            Found found
+    ) {
+
+        if (
+                raw
+                        ==
+                null
+                        ||
+                raw.isEmpty()
+        ) {
 
             return;
         }
 
 
         String text =
-                normalize(
-                        original
-                );
+                raw;
 
 
-        Integer year =
-                findYear(
-                        text
-                );
-
-
+        /*
+         * URL encoded strings също ги декодираме.
+         */
         if (
-                year == null
+                text.contains(
+                        "%"
+                )
         ) {
 
-            status.setText(
-                    "Не разпознах годината."
-            );
+            try {
 
-            return;
-        }
-
-
-        CarModel car =
-                findCar(
-                        text
-                );
-
-
-        if (
-                car == null
-        ) {
-
-            status.setText(
-                    "Не разпознах модела.\n" +
-                    "Каталогът засега е Kia + Hyundai."
-            );
-
-            return;
-        }
-
-
-        String fuel =
-                findFuel(
-                        text
-                );
-
-
-        Generation generation =
-                car.generationFor(
-                        year
-                );
-
-
-        searchCar(
-                car,
-                generation,
-                year,
-                fuel
-        );
-    }
-
-
-    // =========================================================
-    // FIND CAR
-    // =========================================================
-
-    private CarModel findCar(
-            String text
-    ) {
-
-        CarModel best =
-                null;
-
-        int longest =
-                0;
-
-
-        for (
-                CarModel car :
-                        catalog
-        ) {
-
-            for (
-                    String alias :
-                            car.aliases
-            ) {
-
-                String normalizedAlias =
-                        normalize(
-                                alias
+                String decoded =
+                        URLDecoder.decode(
+                                text,
+                                "UTF-8"
                         );
 
 
                 if (
-                        containsPhrase(
-                                text,
-                                normalizedAlias
+                        !decoded.equals(
+                                text
                         )
-                                &&
-                        normalizedAlias.length()
-                                >
-                        longest
                 ) {
 
-                    best =
-                            car;
+                    scanToken(
+                            decoded,
+                            "ModelGroup",
+                            found.modelGroups
+                    );
 
-                    longest =
-                            normalizedAlias.length();
+                    scanToken(
+                            decoded,
+                            "Model",
+                            found.models
+                    );
+
+                    scanToken(
+                            decoded,
+                            "Grade",
+                            found.grades
+                    );
+
+                    scanToken(
+                            decoded,
+                            "BadgeGroup",
+                            found.badgeGroups
+                    );
+
+                    scanToken(
+                            decoded,
+                            "Badge",
+                            found.badges
+                    );
+
+                    scanToken(
+                            decoded,
+                            "FuelType",
+                            found.fuels
+                    );
                 }
+
+            } catch (
+                    Exception ignored
+            ) {
+
+            }
+        }
+
+
+        scanToken(
+                text,
+                "ModelGroup",
+                found.modelGroups
+        );
+
+
+        scanToken(
+                text,
+                "Model",
+                found.models
+        );
+
+
+        scanToken(
+                text,
+                "Grade",
+                found.grades
+        );
+
+
+        scanToken(
+                text,
+                "BadgeGroup",
+                found.badgeGroups
+        );
+
+
+        scanToken(
+                text,
+                "Badge",
+                found.badges
+        );
+
+
+        scanToken(
+                text,
+                "FuelType",
+                found.fuels
+        );
+    }
+
+
+    private void scanToken(
+            String text,
+            String token,
+            Set<String> output
+    ) {
+
+        String marker =
+                token
+                        +
+                ".";
+
+
+        int searchFrom =
+                0;
+
+
+        while (
+                true
+        ) {
+
+            int index =
+                    text.indexOf(
+                            marker,
+                            searchFrom
+                    );
+
+
+            if (
+                    index
+                            <
+                    0
+            ) {
+
+                break;
+            }
+
+
+            int start =
+                    index
+                            +
+                    marker.length();
+
+
+            int end =
+                    findTokenEnd(
+                            text,
+                            start
+                    );
+
+
+            if (
+                    end
+                            >
+                    start
+            ) {
+
+                String value =
+                        text.substring(
+                                start,
+                                end
+                        );
+
+
+                value =
+                        cleanCandidate(
+                                value
+                        );
+
+
+                if (
+                        isGoodCandidate(
+                                value
+                        )
+                ) {
+
+                    output.add(
+                            value
+                    );
+                }
+            }
+
+
+            searchFrom =
+                    start;
+        }
+    }
+
+
+    /*
+     * Търсим края на Encar token,
+     * без да режем вътрешни интервали/тирета/скоби.
+     */
+    private int findTokenEnd(
+            String text,
+            int start
+    ) {
+
+        int best =
+                text.length();
+
+
+        String[] delimiters = {
+
+                "._.",
+                "_.",
+                ".)",
+                "._(",
+
+                ".CarType.",
+                ".Manufacturer.",
+                ".ModelGroup.",
+                ".Model.",
+                ".Grade.",
+                ".BadgeGroup.",
+                ".Badge.",
+                ".FuelType.",
+
+                ".Year.",
+                ".Mileage.",
+                ".Price.",
+                ".SellType.",
+                ".Separation.",
+                ".Color.",
+                ".Transmission."
+        };
+
+
+        for (
+                String delimiter :
+                delimiters
+        ) {
+
+            int index =
+                    text.indexOf(
+                            delimiter,
+                            start
+                    );
+
+
+            if (
+                    index
+                            >=
+                    0
+                            &&
+                    index
+                            <
+                    best
+            ) {
+
+                best =
+                        index;
             }
         }
 
@@ -1300,875 +2431,1046 @@ public class MainActivity extends Activity {
 
 
     // =========================================================
-    // YEAR
+    // ADD BY TYPE
     // =========================================================
 
-    private Integer findYear(
-            String text
+    private void addByType(
+            String type,
+            String value,
+            Found found
     ) {
 
-        text =
-                text.replaceAll(
-                        "\\b20\\s+(\\d{2})\\b",
-                        "20$1"
+        String cleaned =
+                cleanCandidate(
+                        value
                 );
 
 
-        Matcher matcher =
-                Pattern.compile(
-                        "\\b(20\\d{2})\\b"
+        if (
+                !isGoodCandidate(
+                        cleaned
                 )
-                        .matcher(
-                                text
-                        );
-
-
-        if (
-                matcher.find()
         ) {
-
-            try {
-
-                return Integer.parseInt(
-                        matcher.group(1)
-                );
-
-            } catch (
-                    Exception ignored
-            ) {
-            }
-        }
-
-
-        /*
-         * "24 година" -> 2024
-         */
-        matcher =
-                Pattern.compile(
-                        "\\b(1[0-9]|2[0-9])\\s*(?:г|година|год)?\\b"
-                )
-                        .matcher(
-                                text
-                        );
-
-
-        if (
-                matcher.find()
-        ) {
-
-            try {
-
-                return 2000
-                        +
-                        Integer.parseInt(
-                                matcher.group(1)
-                        );
-
-            } catch (
-                    Exception ignored
-            ) {
-            }
-        }
-
-
-        return null;
-    }
-
-
-    // =========================================================
-    // FUEL
-    // =========================================================
-
-    private String findFuel(
-            String text
-    ) {
-
-        /*
-         * HYBRID FIRST
-         */
-        if (
-                text.contains("хибрид")
-                        ||
-                text.contains("hybrid")
-                        ||
-                text.contains("hev")
-        ) {
-
-            return "가솔린+전기";
-        }
-
-
-        if (
-                text.contains("електр")
-                        ||
-                text.contains("electric")
-                        ||
-                text.contains(" ev ")
-        ) {
-
-            return "전기";
-        }
-
-
-        if (
-                text.contains("дизел")
-                        ||
-                text.contains("diesel")
-        ) {
-
-            return "디젤";
-        }
-
-
-        if (
-                text.contains("бензин")
-                        ||
-                text.contains("gasoline")
-                        ||
-                text.contains("petrol")
-        ) {
-
-            return "가솔린";
-        }
-
-
-        /*
-         * Ако не е казано гориво:
-         * НЕ слагаме FuelType филтър.
-         */
-        return null;
-    }
-
-
-    // =========================================================
-    // WORKING ENCAR SEARCH
-    // =========================================================
-
-    private void searchCar(
-            CarModel car,
-            Generation generation,
-            int year,
-            String fuel
-    ) {
-
-        int yearFrom =
-                year * 100;
-
-        int yearTo =
-                yearFrom + 99;
-
-
-        StringBuilder action =
-                new StringBuilder();
-
-
-        /*
-         * Това е работещата архитектура.
-         * Не я сменяме.
-         */
-        action.append(
-                "(And.Year.range("
-        );
-
-        action.append(
-                yearFrom
-        );
-
-        action.append(
-                ".."
-        );
-
-        action.append(
-                yearTo
-        );
-
-        action.append(
-                ")."
-        );
-
-
-        action.append(
-                "_.Hidden.N."
-        );
-
-
-        action.append(
-                "_.(Or.Separation.F._.Separation.B.)"
-        );
-
-
-        action.append(
-                "_.SellType.일반."
-        );
-
-
-        action.append(
-                "_.(C.CarType.Y."
-        );
-
-
-        action.append(
-                "_.(C.Manufacturer."
-        );
-
-
-        action.append(
-                car.manufacturer
-        );
-
-
-        action.append(
-                "."
-        );
-
-
-        action.append(
-                "_.(C.ModelGroup."
-        );
-
-
-        action.append(
-                car.modelGroup
-        );
-
-
-        action.append(
-                "."
-        );
-
-
-        /*
-         * Exact Model се използва САМО
-         * когато вече е потвърден.
-         */
-        if (
-                generation != null
-                        &&
-                generation.exactModel != null
-                        &&
-                !generation.exactModel.isEmpty()
-        ) {
-
-            action.append(
-                    "_.Model."
-            );
-
-            action.append(
-                    generation.exactModel
-            );
-
-            action.append(
-                    "."
-            );
-        }
-
-
-        action.append(
-                ")"
-        );
-
-
-        action.append(
-                ")"
-        );
-
-
-        action.append(
-                ")"
-        );
-
-
-        /*
-         * Ако потребителят е казал гориво.
-         */
-        if (
-                fuel != null
-                        &&
-                !fuel.isEmpty()
-        ) {
-
-            action.append(
-                    "_.FuelType."
-            );
-
-            action.append(
-                    fuel
-            );
-
-            action.append(
-                    "."
-            );
-        }
-
-
-        action.append(
-                ")"
-        );
-
-
-        String json =
-                "{"
-                        +
-                "\"type\":\"car\","
-                        +
-                "\"action\":\""
-                        +
-                action
-                        +
-                "\","
-                        +
-                "\"toggle\":{},"
-                        +
-                "\"layer\":\"\","
-                        +
-                "\"sort\":\"MobilePriceAsc\""
-                        +
-                "}";
-
-
-        try {
-
-            String encoded =
-                    URLEncoder.encode(
-                            json,
-                            StandardCharsets.UTF_8.toString()
-                    );
-
-
-            String url =
-                    "https://car.encar.com/list/car?page=1&search="
-                            +
-                    encoded;
-
-
-            lastResult = "";
-            lastCarUrl = "";
-
-
-            String generationText =
-                    "";
-
-
-            if (
-                    generation != null
-                            &&
-                    generation.label != null
-            ) {
-
-                generationText =
-                        "\nПоколение: "
-                                +
-                        generation.label;
-            }
-
-
-            String fuelText =
-                    fuel == null
-                            ?
-                    "всички горива"
-                            :
-                    fuel;
-
-
-            status.setText(
-                    "Търся "
-                            +
-                    car.displayName
-                            +
-                    " "
-                            +
-                    year
-                            +
-                    generationText
-                            +
-                    "\nГориво: "
-                            +
-                    fuelText
-                            +
-                    "\nНАЙ-НИСКА ЦЕНА ПЪРВО"
-            );
-
-
-            webView.loadUrl(
-                    url
-            );
-
-
-        } catch (
-                Exception e
-        ) {
-
-            status.setText(
-                    "Грешка при търсене: "
-                            +
-                    e.getMessage()
-            );
-        }
-    }
-
-
-    // =========================================================
-    // READ FIRST CAR
-    // =========================================================
-
-    private void startReading() {
-
-        readAttempts = 0;
-
-        readFirstCar();
-    }
-
-
-    private void readFirstCar() {
-
-        readAttempts++;
-
-
-        String script =
-                "(function(){"
-
-                        +
-
-                "var links=Array.from(" +
-                "document.querySelectorAll(" +
-                "'a[href*=\"/cars/detail/\"]'" +
-                ")" +
-                ");"
-
-                        +
-
-                "var car=links.find(function(a){"
-
-                        +
-
-                "var txt=(a.innerText||a.textContent||'')" +
-                ".replace(/\\\\s+/g,' ')" +
-                ".trim();"
-
-                        +
-
-                "if(txt.length<15)return false;"
-
-                        +
-
-                "if(a.classList.contains('sponsored_type'))" +
-                "return false;"
-
-                        +
-
-                "var p=a.parentElement;"
-
-                        +
-
-                "while(p){"
-
-                        +
-
-                "if(p.classList&&" +
-                "p.classList.contains('sponsored_type'))" +
-                "return false;"
-
-                        +
-
-                "p=p.parentElement;"
-
-                        +
-
-                "}"
-
-                        +
-
-                "return true;"
-
-                        +
-
-                "});"
-
-                        +
-
-                "if(!car){"
-
-                        +
-
-                "AndroidCarReader.receiveCar(" +
-                "JSON.stringify({" +
-                "error:'NO_CAR_FOUND'" +
-                "})" +
-                ");"
-
-                        +
-
-                "return;"
-
-                        +
-
-                "}"
-
-                        +
-
-                "var text=" +
-                "(car.innerText||car.textContent||'')" +
-                ".replace(/\\\\s+/g,' ')" +
-                ".trim();"
-
-                        +
-
-                "var mileage=" +
-                "text.match(/([0-9][0-9,]*)\\\\s*km/i);"
-
-                        +
-
-                "var krw=" +
-                "text.match(/([0-9][0-9,]*)\\\\s*만원/);"
-
-                        +
-
-                "var usd=" +
-                "text.match(/([0-9][0-9,]*)\\\\s*USD/i);"
-
-                        +
-
-                "var year1=" +
-                "text.match(/([0-9]{2}\\\\/[0-9]{2}식" +
-                "(?:\\\\([0-9]{2}년형\\\\))?)/);"
-
-                        +
-
-                "var year2=" +
-                "text.match(/((?:0[1-9]|1[0-2])\\\\/20[0-9]{2})/);"
-
-                        +
-
-                "var fuel=" +
-                "text.match(/" +
-
-                "(가솔린\\\\+전기|" +
-                "가솔린 하이브리드|" +
-                "디젤 하이브리드|" +
-                "디젤|" +
-                "가솔린|" +
-                "전기|" +
-                "수소|" +
-                "Diesel Hybrid|" +
-                "Gasoline Hybrid|" +
-                "Diesel|" +
-                "Gasoline|" +
-                "Electric|" +
-                "EV|" +
-                "Hydrogen|" +
-                "LPG)" +
-
-                "/i);"
-
-                        +
-
-                "var href=car.href||'';"
-
-                        +
-
-                "var id=" +
-                "href.match(/\\/cars\\/detail\\/([0-9]+)/);"
-
-                        +
-
-                "AndroidCarReader.receiveCar(" +
-
-                "JSON.stringify({" +
-
-                "text:text," +
-
-                "url:href," +
-
-                "carId:(id?id[1]:'')," +
-
-                "mileage:(mileage?mileage[1]:'')," +
-
-                "year:(year1?year1[1]:" +
-                "(year2?year2[1]:''))," +
-
-                "fuel:(fuel?fuel[1]:'')," +
-
-                "priceKrw:(krw?krw[1]:'')," +
-
-                "priceUsd:(usd?usd[1]:'')" +
-
-                "})" +
-
-                ");"
-
-                        +
-
-                "})();";
-
-
-        webView.evaluateJavascript(
-                script,
-                null
-        );
-    }
-
-
-    // =========================================================
-    // RECEIVE FIRST CAR
-    // =========================================================
-
-    private class CarReader {
-
-        @JavascriptInterface
-        public void receiveCar(
-                String json
-        ) {
-
-            runOnUiThread(
-                    () -> {
-
-                        try {
-
-                            JSONObject obj =
-                                    new JSONObject(
-                                            json
-                                    );
-
-
-                            if (
-                                    obj.has(
-                                            "error"
-                                    )
-                            ) {
-
-                                if (
-                                        readAttempts
-                                                <
-                                        MAX_READ_ATTEMPTS
-                                ) {
-
-                                    status.setText(
-                                            "Обявите още се зареждат... "
-                                                    +
-                                            readAttempts
-                                                    +
-                                            "/"
-                                                    +
-                                            MAX_READ_ATTEMPTS
-                                    );
-
-
-                                    handler.postDelayed(
-                                            () -> readFirstCar(),
-                                            1000
-                                    );
-
-                                } else {
-
-                                    status.setText(
-                                            "Няма намерена реална обява.\n" +
-                                            "Ако Encar показва 0 коли, този модел/поколение ще го сканираме."
-                                    );
-                                }
-
-
-                                return;
-                            }
-
-
-                            String carId =
-                                    obj.optString(
-                                            "carId"
-                                    );
-
-
-                            String year =
-                                    obj.optString(
-                                            "year"
-                                    );
-
-
-                            String mileage =
-                                    obj.optString(
-                                            "mileage"
-                                    );
-
-
-                            String fuel =
-                                    obj.optString(
-                                            "fuel"
-                                    );
-
-
-                            String priceKrw =
-                                    obj.optString(
-                                            "priceKrw"
-                                    );
-
-
-                            String priceUsd =
-                                    obj.optString(
-                                            "priceUsd"
-                                    );
-
-
-                            String url =
-                                    obj.optString(
-                                            "url"
-                                    );
-
-
-                            String raw =
-                                    obj.optString(
-                                            "text"
-                                    );
-
-
-                            lastCarUrl =
-                                    url;
-
-
-                            String price;
-
-
-                            if (
-                                    !priceKrw.isEmpty()
-                            ) {
-
-                                price =
-                                        priceKrw
-                                                +
-                                        " 만원";
-
-                            } else if (
-                                    !priceUsd.isEmpty()
-                            ) {
-
-                                price =
-                                        priceUsd
-                                                +
-                                        " USD";
-
-                            } else {
-
-                                price =
-                                        "не е разпозната";
-                            }
-
-
-                            lastResult =
-                                    "ПЪРВА ОБЯВА\n\n"
-
-                                            +
-
-                                    "ID: "
-                                            +
-                                    carId
-                                            +
-                                    "\n"
-
-                                            +
-
-                                    "Година: "
-                                            +
-                                    year
-                                            +
-                                    "\n"
-
-                                            +
-
-                                    "Пробег: "
-                                            +
-                                    mileage
-                                            +
-                                    " km\n"
-
-                                            +
-
-                                    "Гориво: "
-                                            +
-                                    fuel
-                                            +
-                                    "\n"
-
-                                            +
-
-                                    "Цена: "
-                                            +
-                                    price
-                                            +
-                                    "\n\n"
-
-                                            +
-
-                                    "LINK:\n"
-                                            +
-                                    url
-                                            +
-                                    "\n\n"
-
-                                            +
-
-                                    "RAW:\n"
-                                            +
-                                    raw;
-
-
-                            status.setText(
-                                    lastResult
-                            );
-
-
-                        } catch (
-                                Exception e
-                        ) {
-
-                            status.setText(
-                                    "Грешка при четене: "
-                                            +
-                                    e.getMessage()
-                            );
-                        }
-                    }
-            );
-        }
-    }
-
-
-    // =========================================================
-    // OPEN CAR
-    // =========================================================
-
-    private void openFirstCar() {
-
-        if (
-                lastCarUrl == null
-                        ||
-                lastCarUrl.isEmpty()
-        ) {
-
-            status.setText(
-                    "Първо изчакай да намеря първата обява."
-            );
 
             return;
         }
 
 
-        webView.loadUrl(
-                lastCarUrl
+        if (
+                "ModelGroup".equals(
+                        type
+                )
+        ) {
+
+            found.modelGroups.add(
+                    cleaned
+            );
+
+
+        } else if (
+                "Model".equals(
+                        type
+                )
+        ) {
+
+            found.models.add(
+                    cleaned
+            );
+
+
+        } else if (
+                "Grade".equals(
+                        type
+                )
+        ) {
+
+            found.grades.add(
+                    cleaned
+            );
+
+
+        } else if (
+                "BadgeGroup".equals(
+                        type
+                )
+        ) {
+
+            found.badgeGroups.add(
+                    cleaned
+            );
+
+
+        } else if (
+                "Badge".equals(
+                        type
+                )
+        ) {
+
+            found.badges.add(
+                    cleaned
+            );
+
+
+        } else if (
+                "FuelType".equals(
+                        type
+                )
+        ) {
+
+            found.fuels.add(
+                    cleaned
+            );
+        }
+    }
+
+
+    // =========================================================
+    // TYPE HELPERS
+    // =========================================================
+
+    private boolean isCatalogType(
+            String value
+    ) {
+
+        if (
+                value
+                        ==
+                null
+        ) {
+
+            return false;
+        }
+
+
+        String v =
+                value.trim();
+
+
+        return v.equalsIgnoreCase(
+                "ModelGroup"
+        )
+                ||
+                v.equalsIgnoreCase(
+                        "Model"
+                )
+                ||
+                v.equalsIgnoreCase(
+                        "Grade"
+                )
+                ||
+                v.equalsIgnoreCase(
+                        "BadgeGroup"
+                )
+                ||
+                v.equalsIgnoreCase(
+                        "Badge"
+                )
+                ||
+                v.equalsIgnoreCase(
+                        "FuelType"
+                );
+    }
+
+
+    private String normalizeType(
+            String value
+    ) {
+
+        if (
+                value.equalsIgnoreCase(
+                        "ModelGroup"
+                )
+        ) {
+
+            return "ModelGroup";
+        }
+
+
+        if (
+                value.equalsIgnoreCase(
+                        "Model"
+                )
+        ) {
+
+            return "Model";
+        }
+
+
+        if (
+                value.equalsIgnoreCase(
+                        "Grade"
+                )
+        ) {
+
+            return "Grade";
+        }
+
+
+        if (
+                value.equalsIgnoreCase(
+                        "BadgeGroup"
+                )
+        ) {
+
+            return "BadgeGroup";
+        }
+
+
+        if (
+                value.equalsIgnoreCase(
+                        "Badge"
+                )
+        ) {
+
+            return "Badge";
+        }
+
+
+        if (
+                value.equalsIgnoreCase(
+                        "FuelType"
+                )
+        ) {
+
+            return "FuelType";
+        }
+
+
+        return null;
+    }
+
+
+    private boolean isNameField(
+            String key
+    ) {
+
+        if (
+                key
+                        ==
+                null
+        ) {
+
+            return false;
+        }
+
+
+        return key.equalsIgnoreCase(
+                "Value"
+        )
+                ||
+                key.equalsIgnoreCase(
+                        "Name"
+                )
+                ||
+                key.equalsIgnoreCase(
+                        "Text"
+                )
+                ||
+                key.equalsIgnoreCase(
+                        "Label"
+                )
+                ||
+                key.equalsIgnoreCase(
+                        "Title"
+                )
+                ||
+                key.equalsIgnoreCase(
+                        "DisplayName"
+                );
+    }
+
+
+    // =========================================================
+    // CANDIDATE CLEANUP
+    // =========================================================
+
+    private String cleanCandidate(
+            String value
+    ) {
+
+        if (
+                value
+                        ==
+                null
+        ) {
+
+            return "";
+        }
+
+
+        String result =
+                value.trim();
+
+
+        while (
+                result.endsWith(
+                        "."
+                )
+                        ||
+                result.endsWith(
+                        ")"
+                )
+                        ||
+                result.endsWith(
+                        "\""
+                )
+                        ||
+                result.endsWith(
+                        "'"
+                )
+        ) {
+
+            result =
+                    result.substring(
+                            0,
+                            result.length()
+                                    -
+                            1
+                    )
+                            .trim();
+        }
+
+
+        while (
+                result.startsWith(
+                        "\""
+                )
+                        ||
+                result.startsWith(
+                        "'"
+                )
+        ) {
+
+            result =
+                    result.substring(
+                            1
+                    )
+                            .trim();
+        }
+
+
+        return result;
+    }
+
+
+    private boolean isGoodCandidate(
+            String value
+    ) {
+
+        if (
+                value
+                        ==
+                null
+        ) {
+
+            return false;
+        }
+
+
+        String v =
+                value.trim();
+
+
+        if (
+                v.isEmpty()
+                        ||
+                v.length()
+                        >
+                100
+        ) {
+
+            return false;
+        }
+
+
+        if (
+                v.equalsIgnoreCase(
+                        "Model"
+                )
+                        ||
+                v.equalsIgnoreCase(
+                        "ModelGroup"
+                )
+                        ||
+                v.equalsIgnoreCase(
+                        "Grade"
+                )
+                        ||
+                v.equalsIgnoreCase(
+                        "Badge"
+                )
+                        ||
+                v.equalsIgnoreCase(
+                        "BadgeGroup"
+                )
+                        ||
+                v.equalsIgnoreCase(
+                        "FuelType"
+                )
+        ) {
+
+            return false;
+        }
+
+
+        if (
+                v.startsWith(
+                        "http"
+                )
+                        ||
+                v.contains(
+                        "{"
+                )
+                        ||
+                v.contains(
+                        "}"
+                )
+                        ||
+                v.contains(
+                        "["
+                )
+                        ||
+                v.contains(
+                        "]"
+                )
+        ) {
+
+            return false;
+        }
+
+
+        /*
+         * Само число = вероятно count/id.
+         */
+        if (
+                v.matches(
+                        "[0-9,.]+"
+                )
+        ) {
+
+            return false;
+        }
+
+
+        return true;
+    }
+
+
+    private void cleanupSet(
+            Set<String> set
+    ) {
+
+        Set<String> cleaned =
+                new LinkedHashSet<>();
+
+
+        for (
+                String item :
+                set
+        ) {
+
+            String value =
+                    cleanCandidate(
+                            item
+                    );
+
+
+            if (
+                    isGoodCandidate(
+                            value
+                    )
+            ) {
+
+                cleaned.add(
+                        value
+                );
+            }
+        }
+
+
+        set.clear();
+
+        set.addAll(
+                cleaned
         );
     }
 
 
     // =========================================================
-    // COPY
+    // STRUCTURED LOG
     // =========================================================
 
-    private void copyResult() {
+    private void writeFound(
+            Task task,
+            Found found
+    ) throws Exception {
 
-        String text =
-                lastResult;
+        for (
+                String value :
+                found.modelGroups
+        ) {
+
+            writeCatalogLine(
+                    "MODEL_GROUP",
+                    task,
+                    value
+            );
+        }
+
+
+        for (
+                String value :
+                found.models
+        ) {
+
+            writeCatalogLine(
+                    "MODEL",
+                    task,
+                    value
+            );
+        }
+
+
+        for (
+                String value :
+                found.grades
+        ) {
+
+            writeCatalogLine(
+                    "GRADE",
+                    task,
+                    value
+            );
+        }
+
+
+        for (
+                String value :
+                found.badgeGroups
+        ) {
+
+            writeCatalogLine(
+                    "BADGE_GROUP",
+                    task,
+                    value
+            );
+        }
+
+
+        for (
+                String value :
+                found.badges
+        ) {
+
+            writeCatalogLine(
+                    "BADGE",
+                    task,
+                    value
+            );
+        }
+
+
+        for (
+                String value :
+                found.fuels
+        ) {
+
+            writeCatalogLine(
+                    "FUEL",
+                    task,
+                    value
+            );
+        }
+    }
+
+
+    private void writeCatalogLine(
+            String type,
+            Task task,
+            String value
+    ) throws Exception {
+
+        String line =
+                "CATALOG"
+                        +
+                "|BRAND="
+                        +
+                task.brand.display
+                        +
+                "|MANUFACTURER="
+                        +
+                task.brand.manufacturer
+                        +
+                "|MODEL_GROUP="
+                        +
+                safe(
+                        task.modelGroup
+                )
+                        +
+                "|MODEL="
+                        +
+                safe(
+                        task.model
+                )
+                        +
+                "|GRADE="
+                        +
+                safe(
+                        task.grade
+                )
+                        +
+                "|BADGE_GROUP="
+                        +
+                safe(
+                        task.badgeGroup
+                )
+                        +
+                "|FOUND_TYPE="
+                        +
+                type
+                        +
+                "|VALUE="
+                        +
+                value;
+
+
+        writeLine(
+                line
+                        +
+                "\n"
+        );
+
+
+        appendSummary(
+                line
+        );
+    }
+
+
+    private String safe(
+            String value
+    ) {
+
+        return value
+                ==
+        null
+                ?
+        ""
+                :
+        value;
+    }
+
+
+    // =========================================================
+    // RAW RESPONSE LOG
+    // =========================================================
+
+    private void writeRawResponse(
+            int number,
+            Task task,
+            String q,
+            ApiResult response
+    ) throws Exception {
+
+        writeLine(
+                "\n\n"
+        );
+
+
+        writeLine(
+                "============================================================\n"
+        );
+
+
+        writeLine(
+                "REQUEST #"
+                        +
+                number
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "BRAND: "
+                        +
+                task.brand.display
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "TASK: "
+                        +
+                taskDescription(
+                        task
+                )
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "HTTP: "
+                        +
+                response.code
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "Q:\n"
+                        +
+                q
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "URL:\n"
+                        +
+                response.url
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "---------------- RAW RESPONSE ----------------\n"
+        );
+
+
+        writeLine(
+                response.body
+                        ==
+                null
+                        ?
+                ""
+                        :
+                response.body
+        );
+
+
+        writeLine(
+                "\n-------------- END RAW RESPONSE --------------\n"
+        );
+    }
+
+
+    // =========================================================
+    // OUTPUT FILE
+    // =========================================================
+
+    private void openOutputFile()
+            throws Exception {
+
+        String stamp =
+                new SimpleDateFormat(
+                        "yyyyMMdd_HHmmss",
+                        Locale.US
+                )
+                        .format(
+                                new Date()
+                        );
+
+
+        outputFileName =
+                "ENCAR_CATALOG_SCAN_ALL_"
+                        +
+                stamp
+                        +
+                ".txt";
 
 
         if (
-                text == null
-                        ||
+                Build.VERSION.SDK_INT
+                        >=
+                Build.VERSION_CODES.Q
+        ) {
+
+            ContentValues values =
+                    new ContentValues();
+
+
+            values.put(
+                    MediaStore.Downloads.DISPLAY_NAME,
+                    outputFileName
+            );
+
+
+            values.put(
+                    MediaStore.Downloads.MIME_TYPE,
+                    "text/plain"
+            );
+
+
+            values.put(
+                    MediaStore.Downloads.RELATIVE_PATH,
+                    Environment.DIRECTORY_DOWNLOADS
+                            +
+                    "/"
+            );
+
+
+            downloadUri =
+                    getContentResolver()
+                            .insert(
+                                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                                    values
+                            );
+
+
+            if (
+                    downloadUri
+                            ==
+                    null
+            ) {
+
+                throw new Exception(
+                        "Не мога да създам файла в Downloads."
+                );
+            }
+
+
+            OutputStream stream =
+                    getContentResolver()
+                            .openOutputStream(
+                                    downloadUri
+                            );
+
+
+            if (
+                    stream
+                            ==
+                    null
+            ) {
+
+                throw new Exception(
+                        "Не мога да отворя output файла."
+                );
+            }
+
+
+            fileWriter =
+                    new BufferedWriter(
+                            new OutputStreamWriter(
+                                    stream,
+                                    StandardCharsets.UTF_8
+                            )
+                    );
+
+
+        } else {
+
+            File folder =
+                    getExternalFilesDir(
+                            Environment.DIRECTORY_DOWNLOADS
+                    );
+
+
+            if (
+                    folder
+                            ==
+                    null
+            ) {
+
+                folder =
+                        getExternalFilesDir(
+                                null
+                        );
+            }
+
+
+            File file =
+                    new File(
+                            folder,
+                            outputFileName
+                    );
+
+
+            fallbackFilePath =
+                    file.getAbsolutePath();
+
+
+            fileWriter =
+                    new BufferedWriter(
+                            new FileWriter(
+                                    file
+                            )
+                    );
+        }
+    }
+
+
+    private void writeHeader()
+            throws Exception {
+
+        writeLine(
+                "===== ENCAR AUTO CATALOG SCAN =====\n"
+        );
+
+
+        writeLine(
+                "DATE="
+                        +
+                new Date()
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "BRANDS=KIA,HYUNDAI,MERCEDES,BMW,AUDI\n"
+        );
+
+
+        writeLine(
+                "API="
+                        +
+                API
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "DELAY_MS="
+                        +
+                REQUEST_DELAY_MS
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "MAX_REQUESTS="
+                        +
+                MAX_REQUESTS
+                        +
+                "\n"
+        );
+
+
+        writeLine(
+                "===================================\n\n"
+        );
+    }
+
+
+    private synchronized void writeLine(
+            String text
+    ) throws Exception {
+
+        if (
+                fileWriter
+                        ==
+                null
+        ) {
+
+            return;
+        }
+
+
+        fileWriter.write(
+                text
+        );
+
+
+        /*
+         * Flush след всяка заявка/ред.
+         *
+         * Ако приложението бъде затворено,
+         * вече събраното остава във файла.
+         */
+        fileWriter.flush();
+    }
+
+
+    private void closeOutputFile() {
+
+        try {
+
+            if (
+                    fileWriter
+                            !=
+                    null
+            ) {
+
+                fileWriter.flush();
+
+                fileWriter.close();
+            }
+
+        } catch (
+                Exception ignored
+        ) {
+
+        }
+
+
+        fileWriter =
+                null;
+    }
+
+
+    private String getSavedLocation() {
+
+        if (
+                Build.VERSION.SDK_INT
+                        >=
+                Build.VERSION_CODES.Q
+        ) {
+
+            return "Файл: Downloads/"
+                    +
+                    outputFileName;
+        }
+
+
+        return "Файл: "
+                +
+                fallbackFilePath;
+    }
+
+
+    // =========================================================
+    // SUMMARY
+    // =========================================================
+
+    private synchronized void appendSummary(
+            String line
+    ) {
+
+        /*
+         * Обобщението може да стане голямо,
+         * но е много по-малко от RAW файла.
+         */
+        summary.append(
+                line
+        );
+
+        summary.append(
+                "\n"
+        );
+
+
+        /*
+         * Не обновяваме TextView при всеки намерен token,
+         * защото ще забави сканирането.
+         */
+    }
+
+
+    private void copySummary() {
+
+        String text =
+                summary.toString();
+
+
+        if (
                 text.isEmpty()
         ) {
 
@@ -2186,111 +3488,251 @@ public class MainActivity extends Activity {
                         );
 
 
-        ClipData clip =
-                ClipData.newPlainText(
-                        "Encar result",
-                        text
-                );
-
-
         clipboard.setPrimaryClip(
-                clip
+                ClipData.newPlainText(
+                        "Encar catalog summary",
+                        text
+                )
         );
 
 
-        status.setText(
-                text
-                        +
-                "\n\nКОПИРАНО ✅"
-        );
+        Toast.makeText(
+                this,
+                "Обобщението е копирано.",
+                Toast.LENGTH_SHORT
+        ).show();
     }
 
 
     // =========================================================
-    // TEXT HELPERS
+    // STATUS
     // =========================================================
 
-    private String normalize(
-            String text
+    private void showProgress(
+            String message
     ) {
 
+        runOnUiThread(
+                () -> {
+
+                    status.setText(
+                            message
+                    );
+
+
+                    /*
+                     * Показваме само последните части от summary.
+                     */
+                    String all =
+                            summary.toString();
+
+
+                    if (
+                            all.length()
+                                    >
+                            12000
+                    ) {
+
+                        all =
+                                all.substring(
+                                        all.length()
+                                                -
+                                        12000
+                                );
+                    }
+
+
+                    outputView.setText(
+                            all
+                    );
+                }
+        );
+    }
+
+
+    private String taskDescription(
+            Task task
+    ) {
+
+        StringBuilder text =
+                new StringBuilder();
+
+
+        text.append(
+                task.brand.display
+        );
+
+
         if (
-                text == null
+                task.modelGroup
+                        !=
+                null
+        ) {
+
+            text.append(
+                    " → ModelGroup: "
+            );
+
+
+            text.append(
+                    task.modelGroup
+            );
+        }
+
+
+        if (
+                task.model
+                        !=
+                null
+        ) {
+
+            text.append(
+                    " → Model: "
+            );
+
+
+            text.append(
+                    task.model
+            );
+        }
+
+
+        if (
+                task.grade
+                        !=
+                null
+        ) {
+
+            text.append(
+                    " → Grade: "
+            );
+
+
+            text.append(
+                    task.grade
+            );
+        }
+
+
+        if (
+                task.badgeGroup
+                        !=
+                null
+        ) {
+
+            text.append(
+                    " → BadgeGroup: "
+            );
+
+
+            text.append(
+                    task.badgeGroup
+            );
+        }
+
+
+        return text.toString();
+    }
+
+
+    // =========================================================
+    // HTTP HELPERS
+    // =========================================================
+
+    private String encode(
+            String value
+    ) throws Exception {
+
+        return URLEncoder.encode(
+                value,
+                "UTF-8"
+        );
+    }
+
+
+    private String readAll(
+            InputStream stream
+    ) throws Exception {
+
+        if (
+                stream
+                        ==
+                null
         ) {
 
             return "";
         }
 
 
-        return text
-                .toLowerCase(
-                        Locale.ROOT
+        BufferedReader reader =
+                new BufferedReader(
+                        new InputStreamReader(
+                                stream,
+                                StandardCharsets.UTF_8
+                        )
+                );
+
+
+        StringBuilder result =
+                new StringBuilder();
+
+
+        String line;
+
+
+        while (
+                (
+                        line =
+                                reader.readLine()
                 )
-                .replace(
-                        '-',
-                        ' '
-                )
-                .replace(
-                        ',',
-                        ' '
-                )
-                .replace(
-                        '.',
-                        ' '
-                )
-                .replaceAll(
-                        "\\s+",
-                        " "
-                )
-                .trim();
-    }
+                        !=
+                null
+        ) {
+
+            result.append(
+                    line
+            );
 
 
-    private boolean containsPhrase(
-            String text,
-            String phrase
-    ) {
-
-        String source =
-                " "
-                        +
-                text
-                        +
-                " ";
+            result.append(
+                    "\n"
+            );
+        }
 
 
-        String target =
-                " "
-                        +
-                phrase
-                        +
-                " ";
+        reader.close();
 
 
-        return source.contains(
-                target
-        );
+        return result.toString();
     }
 
 
     // =========================================================
-    // BACK
+    // DESTROY
     // =========================================================
 
     @Override
-    public void onBackPressed() {
+    protected void onDestroy() {
+
+        stopRequested =
+                true;
+
+
+        closeOutputFile();
+
 
         if (
-                webView != null
-                        &&
-                webView.canGoBack()
+                cookieWebView
+                        !=
+                null
         ) {
 
-            webView.goBack();
+            cookieWebView.stopLoading();
 
-        } else {
-
-            super.onBackPressed();
+            cookieWebView.destroy();
         }
+
+
+        super.onDestroy();
     }
 }
