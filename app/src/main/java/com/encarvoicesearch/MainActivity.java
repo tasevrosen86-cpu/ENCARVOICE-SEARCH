@@ -1,9 +1,6 @@
 package com.encarvoicesearch;
 
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -20,10 +17,6 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.json.JSONObject;
-
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -32,20 +25,15 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity {
 
     private WebView webView;
-    private TextView status;
     private EditText searchInput;
+    private TextView status;
 
     private final Handler handler =
             new Handler(Looper.getMainLooper());
 
-    private int readAttempts = 0;
-
-    private static final int MAX_READ_ATTEMPTS = 12;
     private static final int SPEECH_REQUEST_CODE = 1001;
 
-    private String lastResult = "";
-
-    private boolean autoReadScheduled = false;
+    private SearchCommand pendingCommand = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,21 +41,19 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(12, 12, 12, 0);
+        root.setPadding(10, 10, 10, 0);
 
-        // ==============================
-        // SEARCH BAR
-        // ==============================
+        // =====================================================
+        // SEARCH ROW
+        // =====================================================
 
         LinearLayout searchRow = new LinearLayout(this);
         searchRow.setOrientation(LinearLayout.HORIZONTAL);
 
         searchInput = new EditText(this);
-
         searchInput.setHint(
-                "Kia Sorento 2025 дизел"
+                "Например: BMW X5 2024 дизел"
         );
-
         searchInput.setSingleLine(true);
         searchInput.setTextSize(17);
 
@@ -92,48 +78,18 @@ public class MainActivity extends Activity {
                 )
         );
 
-        Button showResultsButton =
-                new Button(this);
+        Button searchButton = new Button(this);
 
-        showResultsButton.setText(
+        searchButton.setText(
                 "ПОКАЖИ РЕЗУЛТАТИТЕ"
         );
 
-        // ==============================
-        // STATUS
-        // ==============================
-
         status = new TextView(this);
-
-        status.setText(
-                "Напиши или кажи автомобил"
-        );
-
+        status.setPadding(10, 12, 10, 12);
         status.setTextSize(14);
-        status.setPadding(8, 15, 8, 15);
-        status.setTextIsSelectable(true);
-
-        // ==============================
-        // DIAGNOSTIC BUTTONS
-        // ==============================
-
-        Button readButton =
-                new Button(this);
-
-        readButton.setText(
-                "READ FIRST CAR"
+        status.setText(
+                "Напиши или кажи автомобил."
         );
-
-        Button copyButton =
-                new Button(this);
-
-        copyButton.setText(
-                "COPY RESULT"
-        );
-
-        // ==============================
-        // WEBVIEW
-        // ==============================
 
         webView = new WebView(this);
 
@@ -157,8 +113,8 @@ public class MainActivity extends Activity {
                 );
 
         webView.addJavascriptInterface(
-                new CarReader(),
-                "AndroidCarReader"
+                new SearchBridge(),
+                "AndroidSearch"
         );
 
         webView.setWebViewClient(
@@ -176,45 +132,34 @@ public class MainActivity extends Activity {
                         );
 
                         if (
+                                pendingCommand != null &&
                                 url != null &&
                                 url.contains(
                                         "car.encar.com/list/car"
                                 )
                         ) {
 
-                            if (!autoReadScheduled) {
+                            status.setText(
+                                    "Encar е зареден.\n" +
+                                    "Търся производителя..."
+                            );
 
-                                autoReadScheduled = true;
-
-                                status.setText(
-                                        "Резултатите са заредени.\n" +
-                                        "Търся първата обява..."
-                                );
-
-                                handler.postDelayed(
-                                        () -> startReading(),
-                                        1800
-                                );
-                            }
+                            handler.postDelayed(
+                                    () ->
+                                            startUniversalSearch(
+                                                    pendingCommand
+                                            ),
+                                    1500
+                            );
                         }
                     }
                 }
         );
 
-        // ==============================
-        // ADD VIEWS
-        // ==============================
+        root.addView(searchRow);
 
         root.addView(
-                searchRow,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        );
-
-        root.addView(
-                showResultsButton,
+                searchButton,
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
@@ -223,22 +168,6 @@ public class MainActivity extends Activity {
 
         root.addView(
                 status,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        );
-
-        root.addView(
-                readButton,
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-        );
-
-        root.addView(
-                copyButton,
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
@@ -256,30 +185,23 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        // ==============================
-        // BUTTON ACTIONS
-        // ==============================
-
         micButton.setOnClickListener(
                 v -> startVoiceRecognition()
         );
 
-        showResultsButton.setOnClickListener(
-                v -> searchFromInput()
+        searchButton.setOnClickListener(
+                v -> beginSearch()
         );
 
-        readButton.setOnClickListener(
-                v -> startReading()
-        );
-
-        copyButton.setOnClickListener(
-                v -> copyResult()
+        // Зареждаме Encar още при стартиране.
+        webView.loadUrl(
+                "https://car.encar.com/list/car"
         );
     }
 
-    // ============================================================
+    // =========================================================
     // VOICE
-    // ============================================================
+    // =========================================================
 
     private void startVoiceRecognition() {
 
@@ -292,8 +214,7 @@ public class MainActivity extends Activity {
                     );
 
             intent.putExtra(
-                    RecognizerIntent
-                            .EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                     RecognizerIntent
                             .LANGUAGE_MODEL_FREE_FORM
             );
@@ -345,8 +266,7 @@ public class MainActivity extends Activity {
 
             ArrayList<String> results =
                     data.getStringArrayListExtra(
-                            RecognizerIntent
-                                    .EXTRA_RESULTS
+                            RecognizerIntent.EXTRA_RESULTS
                     );
 
             if (
@@ -360,9 +280,7 @@ public class MainActivity extends Activity {
                 searchInput.setText(spoken);
 
                 searchInput.setSelection(
-                        searchInput
-                                .getText()
-                                .length()
+                        spoken.length()
                 );
 
                 status.setText(
@@ -376,577 +294,783 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ============================================================
-    // SEARCH INPUT
-    // ============================================================
+    // =========================================================
+    // START SEARCH
+    // =========================================================
 
-    private void searchFromInput() {
+    private void beginSearch() {
 
-        String command =
+        String text =
                 searchInput
                         .getText()
                         .toString()
                         .trim();
 
-        if (command.isEmpty()) {
+        if (text.isEmpty()) {
 
             status.setText(
-                    "Напиши или кажи " +
-                    "каква кола търсиш."
+                    "Напиши или кажи автомобил."
             );
 
             return;
         }
 
-        SearchParameters params =
-                parseSearchCommand(command);
+        SearchCommand command =
+                parseCommand(text);
 
-        if (params.error != null) {
+        if (command.brand.isEmpty()) {
 
             status.setText(
-                    params.error
+                    "Не успях да определя марката."
             );
 
             return;
         }
 
-        searchEncar(params);
-    }
+        if (command.model.isEmpty()) {
 
-    // ============================================================
-    // PARSE VOICE / TEXT
-    // ============================================================
+            status.setText(
+                    "Не успях да определя модела."
+            );
 
-    private SearchParameters parseSearchCommand(
-            String command
-    ) {
-
-        SearchParameters result =
-                new SearchParameters();
-
-        String text =
-                command
-                        .toLowerCase(
-                                Locale.ROOT
-                        )
-                        .trim();
-
-        // ==============================
-        // MANUFACTURER
-        // ==============================
-
-        boolean isKia =
-                text.contains("kia") ||
-                text.contains("киа");
-
-        if (!isKia) {
-
-            result.error =
-                    "Засега имаме проверена " +
-                    "Encar структура за Kia Sorento.\n\n" +
-                    "Командата не съдържа Kia.";
-
-            return result;
+            return;
         }
 
-        // ==============================
-        // MODEL
-        // ==============================
+        pendingCommand =
+                command;
 
-        boolean isSorento =
-                text.contains("sorento") ||
-                text.contains("соренто");
+        status.setText(
+                "Разбрах:\n" +
+                "Марка: " +
+                command.brand +
+                "\n" +
+                "Модел: " +
+                command.model +
+                "\n" +
+                "Година: " +
+                command.year +
+                "\n" +
+                "Гориво: " +
+                command.fuel +
+                "\n\n" +
+                "Подготвям Encar..."
+        );
 
-        if (!isSorento) {
+        String current =
+                webView.getUrl();
 
-            result.error =
-                    "Разпознах Kia, но засега " +
-                    "провереният модел е Sorento.";
+        if (
+                current == null ||
+                !current.contains(
+                        "car.encar.com/list/car"
+                )
+        ) {
 
-            return result;
-        }
-
-        result.manufacturer =
-                "기아";
-
-        result.modelGroup =
-                "쏘렌토";
-
-        result.model =
-                "더 뉴 쏘렌토 4세대";
-
-        result.brandDisplay =
-                "Kia";
-
-        result.modelDisplay =
-                "Sorento";
-
-        // ==============================
-        // YEAR
-        // ==============================
-
-        Matcher yearMatcher =
-                Pattern.compile(
-                        "\\b(20\\d{2})\\b"
-                ).matcher(text);
-
-        if (yearMatcher.find()) {
-
-            result.year =
-                    yearMatcher.group(1);
+            webView.loadUrl(
+                    "https://car.encar.com/list/car"
+            );
 
         } else {
 
-            Matcher shortYear =
-                    Pattern.compile(
-                            "\\b(23|24|25|26)" +
-                            "\\s*" +
-                            "(?:г|г\\.|год|година)?\\b"
-                    ).matcher(text);
-
-            if (shortYear.find()) {
-
-                result.year =
-                        "20" +
-                        shortYear.group(1);
-            }
+            startUniversalSearch(
+                    command
+            );
         }
+    }
 
-        if (!result.year.isEmpty()) {
+    // =========================================================
+    // PARSER
+    // =========================================================
 
-            try {
+    private SearchCommand parseCommand(
+            String original
+    ) {
 
-                int y =
-                        Integer.parseInt(
-                                result.year
+        SearchCommand result =
+                new SearchCommand();
+
+        String text =
+                original
+                        .trim()
+                        .replaceAll(
+                                "\\s+",
+                                " "
                         );
 
-                if (
-                        y < 2023 ||
-                        y > 2026
-                ) {
+        String lower =
+                text.toLowerCase(
+                        Locale.ROOT
+                );
 
-                    result.error =
-                            "За Kia Sorento " +
-                            result.year +
-                            " трябва да добавим " +
-                            "правилната Encar генерация.\n\n" +
-                            "Сегашната проверена генерация е " +
-                            "The New Sorento 4th (2023–current).";
+        // YEAR
 
-                    return result;
-                }
+        Matcher matcher =
+                Pattern.compile(
+                        "\\b(20\\d{2})\\b"
+                ).matcher(lower);
 
-            } catch (Exception ignored) {
-            }
+        if (matcher.find()) {
+
+            result.year =
+                    matcher.group(1);
+
+            lower =
+                    lower.replace(
+                            result.year,
+                            " "
+                    );
         }
 
-        // ==============================
         // FUEL
-        // ==============================
 
         if (
-                text.contains("хибрид") ||
-                text.contains("hybrid")
+                lower.contains("дизел") ||
+                lower.contains("diesel")
         ) {
 
             result.fuel =
-                    "가솔린 하이브리드";
-
-            result.fuelDisplay =
-                    "Hybrid";
-
-        } else if (
-                text.contains("дизел") ||
-                text.contains("diesel")
-        ) {
-
-            result.fuel =
-                    "디젤";
-
-            result.fuelDisplay =
                     "Diesel";
 
+            lower =
+                    lower
+                            .replace(
+                                    "дизел",
+                                    " "
+                            )
+                            .replace(
+                                    "diesel",
+                                    " "
+                            );
+
         } else if (
-                text.contains("бензин") ||
-                text.contains("gasoline") ||
-                text.contains("petrol")
+                lower.contains("хибрид") ||
+                lower.contains("hybrid")
         ) {
 
             result.fuel =
-                    "가솔린";
+                    "Hybrid";
 
-            result.fuelDisplay =
+            lower =
+                    lower
+                            .replace(
+                                    "хибрид",
+                                    " "
+                            )
+                            .replace(
+                                    "hybrid",
+                                    " "
+                            );
+
+        } else if (
+                lower.contains("бензин") ||
+                lower.contains("gasoline") ||
+                lower.contains("petrol")
+        ) {
+
+            result.fuel =
                     "Gasoline";
+
+            lower =
+                    lower
+                            .replace(
+                                    "бензин",
+                                    " "
+                            )
+                            .replace(
+                                    "gasoline",
+                                    " "
+                            )
+                            .replace(
+                                    "petrol",
+                                    " "
+                            );
+
+        } else if (
+                lower.contains("електр") ||
+                lower.contains("electric") ||
+                lower.contains(" ev")
+        ) {
+
+            result.fuel =
+                    "Electric";
+
+            lower =
+                    lower
+                            .replace(
+                                    "електрически",
+                                    " "
+                            )
+                            .replace(
+                                    "електрическа",
+                                    " "
+                            )
+                            .replace(
+                                    "electric",
+                                    " "
+                            );
+        }
+
+        lower =
+                lower.replaceAll(
+                        "\\s+",
+                        " "
+                ).trim();
+
+        String[] parts =
+                lower.split(" ");
+
+        if (parts.length >= 1) {
+
+            result.brand =
+                    normalizeBrand(
+                            parts[0]
+                    );
+        }
+
+        if (parts.length >= 2) {
+
+            StringBuilder model =
+                    new StringBuilder();
+
+            for (
+                    int i = 1;
+                    i < parts.length;
+                    i++
+            ) {
+
+                if (
+                        parts[i].equals("г") ||
+                        parts[i].equals("г.") ||
+                        parts[i].equals("година")
+                ) {
+                    continue;
+                }
+
+                if (model.length() > 0) {
+                    model.append(" ");
+                }
+
+                model.append(
+                        parts[i]
+                );
+            }
+
+            result.model =
+                    model
+                            .toString()
+                            .trim();
         }
 
         return result;
     }
 
-    // ============================================================
-    // BUILD ENCAR SEARCH
-    // ============================================================
+    // =========================================================
+    // BRAND NORMALIZATION
+    //
+    // Това НЕ съдържа модели.
+    // Само различни начини, по които гласът може
+    // да изпише името на производителя.
+    // =========================================================
 
-    private void searchEncar(
-            SearchParameters params
+    private String normalizeBrand(
+            String brand
     ) {
 
-        try {
+        String b =
+                brand
+                        .toLowerCase(
+                                Locale.ROOT
+                        )
+                        .trim();
 
-            StringBuilder action =
-                    new StringBuilder();
+        switch (b) {
 
-            action.append("(And.");
+            case "киа":
+                return "Kia";
 
-            // YEAR
-            if (!params.year.isEmpty()) {
+            case "хюндай":
+            case "хюндаи":
+            case "хундай":
+            case "hyundai":
+                return "Hyundai";
 
-                action.append(
-                        "Year.range("
-                );
+            case "мерцедес":
+            case "мерседес":
+            case "mercedes":
+                return "Mercedes";
 
-                action.append(
-                        params.year
-                );
+            case "бмв":
+            case "bmw":
+                return "BMW";
 
-                action.append(
-                        "00.."
-                );
+            case "ауди":
+            case "audi":
+                return "Audi";
 
-                action.append(
-                        params.year
-                );
+            case "фолксваген":
+            case "волксваген":
+            case "volkswagen":
+            case "vw":
+                return "Volkswagen";
 
-                action.append(
-                        "99)._."
-                );
-            }
+            case "порше":
+            case "porsche":
+                return "Porsche";
 
-            action.append(
-                    "Hidden.N."
-            );
+            case "форд":
+            case "ford":
+                return "Ford";
 
-            action.append(
-                    "_.(Or.Separation.F._.Separation.B.)"
-            );
+            case "тойота":
+            case "toyota":
+                return "Toyota";
 
-            action.append(
-                    "_.SellType.일반."
-            );
+            case "лексус":
+            case "lexus":
+                return "Lexus";
 
-            action.append(
-                    "_.(C.CarType.Y." +
-                    "_." +
-                    "(C.Manufacturer."
-            );
+            case "волво":
+            case "volvo":
+                return "Volvo";
 
-            action.append(
-                    params.manufacturer
-            );
+            case "пежо":
+            case "peugeot":
+                return "Peugeot";
 
-            action.append(
-                    "." +
-                    "_." +
-                    "(C.ModelGroup."
-            );
+            case "хонда":
+            case "honda":
+                return "Honda";
 
-            action.append(
-                    params.modelGroup
-            );
+            case "ниссан":
+            case "nissan":
+                return "Nissan";
 
-            action.append(
-                    "." +
-                    "_." +
-                    "Model."
-            );
+            case "шевролет":
+            case "chevrolet":
+                return "Chevrolet";
 
-            action.append(
-                    params.model
-            );
+            case "джип":
+            case "jeep":
+                return "Jeep";
 
-            action.append(
-                    "." +
-                    ")" +
-                    ")" +
-                    ")"
-            );
+            case "рендж":
+            case "landrover":
+                return "Land Rover";
 
-            // FUEL
-            if (!params.fuel.isEmpty()) {
+            default:
 
-                action.append(
-                        "_." +
-                        "FuelType."
-                );
+                if (brand.length() > 0) {
 
-                action.append(
-                        params.fuel
-                );
+                    return brand
+                            .substring(0, 1)
+                            .toUpperCase(
+                                    Locale.ROOT
+                            ) +
+                            brand.substring(1);
+                }
 
-                action.append(".");
-            }
-
-            action.append(")");
-
-            JSONObject json =
-                    new JSONObject();
-
-            json.put(
-                    "type",
-                    "car"
-            );
-
-            json.put(
-                    "action",
-                    action.toString()
-            );
-
-            json.put(
-                    "title",
-                    "Kia The New Sorento 4Th(23년~현재)"
-            );
-
-            json.put(
-                    "toggle",
-                    new JSONObject()
-            );
-
-            json.put(
-                    "layer",
-                    ""
-            );
-
-            // Най-ниска цена първо
-            json.put(
-                    "sort",
-                    "MobilePriceAsc"
-            );
-
-            String encoded =
-                    URLEncoder.encode(
-                            json.toString(),
-                            StandardCharsets
-                                    .UTF_8
-                                    .toString()
-                    );
-
-            String url =
-                    "https://car.encar.com/" +
-                    "list/car?page=1&search=" +
-                    encoded;
-
-            StringBuilder understood =
-                    new StringBuilder();
-
-            understood.append(
-                    "Разбрах:\n"
-            );
-
-            understood.append(
-                    params.brandDisplay
-            );
-
-            understood.append(
-                    " | "
-            );
-
-            understood.append(
-                    params.modelDisplay
-            );
-
-            if (!params.year.isEmpty()) {
-
-                understood.append(
-                        " | "
-                );
-
-                understood.append(
-                        params.year
-                );
-            }
-
-            if (!params.fuelDisplay.isEmpty()) {
-
-                understood.append(
-                        " | "
-                );
-
-                understood.append(
-                        params.fuelDisplay
-                );
-            }
-
-            understood.append(
-                    "\n\nЗареждам резултатите..."
-            );
-
-            status.setText(
-                    understood.toString()
-            );
-
-            autoReadScheduled = false;
-
-            webView.loadUrl(url);
-
-        } catch (Exception e) {
-
-            status.setText(
-                    "Грешка при търсене: " +
-                    e.getMessage()
-            );
+                return "";
         }
     }
 
-    // ============================================================
-    // READ FIRST CAR
-    // ============================================================
+    // =========================================================
+    // UNIVERSAL ENCAR SEARCH
+    // =========================================================
 
-    private void startReading() {
+    private void startUniversalSearch(
+            SearchCommand command
+    ) {
 
-        readAttempts = 0;
+        String brand =
+                jsEscape(
+                        command.brand
+                );
 
-        status.setText(
-                "Търся първата обява..."
-        );
+        String model =
+                jsEscape(
+                        command.model
+                );
 
-        readFirstCar();
-    }
+        String year =
+                jsEscape(
+                        command.year
+                );
 
-    private void readFirstCar() {
+        String fuel =
+                jsEscape(
+                        command.fuel
+                );
 
-        readAttempts++;
+        /*
+         * Основната разлика спрямо Sorento версията:
+         *
+         * НЯМА:
+         *
+         * Manufacturer.기아
+         * ModelGroup.쏘렌토
+         * Model.더 뉴 쏘렌토...
+         *
+         * Тук четем живите опции на Encar.
+         */
 
         String script =
                 "(function() {" +
 
-                "var allLinks = Array.from(" +
+                "const BRAND='" +
+                brand +
+                "';" +
+
+                "const MODEL='" +
+                model +
+                "';" +
+
+                "const YEAR='" +
+                year +
+                "';" +
+
+                "const FUEL='" +
+                fuel +
+                "';" +
+
+                "function norm(s) {" +
+                " return (s || '')" +
+                ".toLowerCase()" +
+                ".replace(/[^a-z0-9가-힣]+/g,'');" +
+                "}" +
+
+                "function text(el) {" +
+                " return (" +
+                "el.innerText || " +
+                "el.textContent || ''" +
+                ").trim();" +
+                "}" +
+
+                "function visible(el) {" +
+                " if (!el) return false;" +
+                " const r=el.getBoundingClientRect();" +
+                " const st=getComputedStyle(el);" +
+                " return r.width>0 && " +
+                "r.height>0 && " +
+                "st.display!=='none' && " +
+                "st.visibility!=='hidden';" +
+                "}" +
+
+                "function clickable() {" +
+                " return Array.from(" +
                 "document.querySelectorAll(" +
-                "'a[href*=\"/cars/detail/\"]'" +
+                "'a,button,[role=\"button\"],label'" +
                 ")" +
-                ");" +
-
-                "var car = allLinks.find(function(a) {" +
-
-                "var txt = " +
-                "(a.innerText || a.textContent || '')" +
-                ".replace(/\\\\s+/g, ' ')" +
-                ".trim();" +
-
-                "if (txt.length < 15) return false;" +
-
-                "if (" +
-                "a.classList.contains('sponsored_type')" +
-                ") return false;" +
-
-                "var p = a.parentElement;" +
-
-                "while (p) {" +
-
-                "if (" +
-                "p.classList && " +
-                "p.classList.contains('sponsored_type')" +
-                ") return false;" +
-
-                "p = p.parentElement;" +
-
+                ").filter(visible);" +
                 "}" +
 
-                "return true;" +
+                "function bestMatch(word) {" +
 
-                "});" +
+                " const target=norm(word);" +
 
-                "if (!car) {" +
+                " if (!target) return null;" +
 
-                "AndroidCarReader.receiveCar(" +
-                "JSON.stringify({" +
-                "error:'NO_CAR_FOUND'" +
-                "})" +
-                ");" +
+                " const els=clickable();" +
 
-                "return;" +
+                " let exact=null;" +
+                " let contains=null;" +
 
+                " for (const el of els) {" +
+
+                "   const t=norm(text(el));" +
+
+                "   if (!t) continue;" +
+
+                "   if (t===target) {" +
+                "      exact=el;" +
+                "      break;" +
+                "   }" +
+
+                "   if (" +
+                "      !contains && " +
+                "      (t.includes(target) || " +
+                "       target.includes(t))" +
+                "   ) {" +
+                "      contains=el;" +
+                "   }" +
+
+                " }" +
+
+                " return exact || contains;" +
                 "}" +
 
-                "var text = " +
-                "(car.innerText || car.textContent || '')" +
-                ".replace(/\\\\s+/g, ' ')" +
-                ".trim();" +
+                "function clickText(word) {" +
 
-                "var mileageMatch = " +
-                "text.match(/([0-9][0-9,]*)\\\\s*km/i);" +
+                " const el=bestMatch(word);" +
 
-                "var koreanYear = " +
-                "text.match(/([0-9]{2}\\\\/[0-9]{2}식" +
-                "(?:\\\\([0-9]{2}년형\\\\))?)/);" +
+                " if (!el) return false;" +
 
-                "var englishYear = " +
-                "text.match(/((?:0[1-9]|1[0-2])\\\\/20[0-9]{2})/);" +
+                " el.scrollIntoView({" +
+                "   block:'center'" +
+                " });" +
 
-                "var englishRegYear = " +
-                "text.match(/([0-9]{2}\\\\s*\\\\(Reg\\\\.\\\\s*" +
-                "(?:0[1-9]|1[0-2])\\\\/'[0-9]{2}\\\\))/i);" +
+                " el.click();" +
 
-                "var koreanPrice = " +
-                "text.match(/([0-9][0-9,]*)\\\\s*만원/);" +
+                " return true;" +
+                "}" +
 
-                "var usdPrice = " +
-                "text.match(/([0-9][0-9,]*)\\\\s*USD/i);" +
+                "function report(step,msg) {" +
 
-                "var fuelMatch = " +
-                "text.match(/" +
-                "(가솔린 하이브리드|" +
-                "디젤 하이브리드|" +
-                "LPG 하이브리드|" +
-                "디젤|" +
-                "가솔린|" +
-                "전기|" +
-                "수소|" +
-                "Diesel Hybrid|" +
-                "Gasoline Hybrid|" +
-                "Diesel|" +
-                "Gasoline|" +
-                "Electric|" +
-                "EV|" +
-                "Hydrogen|" +
-                "LPG)" +
-                "/i);" +
+                " AndroidSearch.onStatus(" +
+                " step + '|' + msg" +
+                " );" +
+                "}" +
 
-                "var href = car.href || '';" +
+                // ===========================================
+                // MANUFACTURER
+                // ===========================================
 
-                "var idMatch = " +
-                "href.match(/\\/cars\\/detail\\/([0-9]+)/);" +
+                "let manufacturer=" +
+                "document.querySelector('#optManufact');" +
 
-                "var result = {" +
+                "if (!manufacturer) {" +
 
-                "text:text," +
+                " const candidates=clickable();" +
 
-                "url:href," +
+                " manufacturer=" +
+                "candidates.find(function(el) {" +
 
-                "carId:" +
-                "(idMatch ? idMatch[1] : '')," +
+                "   const t=norm(text(el));" +
 
-                "mileage:" +
-                "(mileageMatch ? mileageMatch[1] : '')," +
+                "   return " +
+                "t==='manufacturer' || " +
+                "t==='make' || " +
+                "t.includes('manufacturer');" +
 
-                "year:" +
-                "(koreanYear ? koreanYear[1] :" +
-                "(englishYear ? englishYear[1] :" +
-                "(englishRegYear ? englishRegYear[1] : '')))," +
+                " });" +
+                "}" +
 
-                "fuel:" +
-                "(fuelMatch ? fuelMatch[1] : '')," +
+                "if (!manufacturer) {" +
 
-                "priceKrw:" +
-                "(koreanPrice ? koreanPrice[1] : '')," +
-
-                "priceUsd:" +
-                "(usdPrice ? usdPrice[1] : '')" +
-
-                "};" +
-
-                "AndroidCarReader.receiveCar(" +
-                "JSON.stringify(result)" +
+                " report(" +
+                "'ERROR'," +
+                "'Не намерих Manufacturer филтъра'" +
                 ");" +
+
+                " return;" +
+                "}" +
+
+                "manufacturer.click();" +
+
+                "report(" +
+                "'MANUFACTURER_OPEN'," +
+                "'Manufacturer е отворен'" +
+                ");" +
+
+                // ===========================================
+                // BRAND
+                // ===========================================
+
+                "setTimeout(function() {" +
+
+                " if (!clickText(BRAND)) {" +
+
+                "   report(" +
+                "'ERROR'," +
+                "'Не намерих марка: '+BRAND" +
+                ");" +
+
+                "   return;" +
+                " }" +
+
+                " report(" +
+                "'BRAND_OK'," +
+                "'Избрана марка: '+BRAND" +
+                ");" +
+
+                // ===========================================
+                // MODEL CONTROL
+                // ===========================================
+
+                " setTimeout(function() {" +
+
+                "   let modelControl=null;" +
+
+                "   const controls=clickable();" +
+
+                "   modelControl=" +
+                "controls.find(function(el) {" +
+
+                "      const t=norm(text(el));" +
+
+                "      return " +
+                "      t==='model' || " +
+                "      t.includes('model');" +
+
+                "   });" +
+
+                "   if (!modelControl) {" +
+
+                "      const ids=Array.from(" +
+                "      document.querySelectorAll('[id]')" +
+                "      );" +
+
+                "      modelControl=ids.find(function(el) {" +
+
+                "         return " +
+                "         /model/i.test(el.id) && " +
+                "         visible(el);" +
+
+                "      });" +
+                "   }" +
+
+                "   if (!modelControl) {" +
+
+                "      report(" +
+                "'ERROR'," +
+                "'Марката е избрана, но не намерих Model филтъра'" +
+                ");" +
+
+                "      return;" +
+                "   }" +
+
+                "   modelControl.click();" +
+
+                "   report(" +
+                "'MODEL_OPEN'," +
+                "'Model е отворен'" +
+                ");" +
+
+                // ===========================================
+                // MODEL
+                // ===========================================
+
+                "   setTimeout(function() {" +
+
+                "      if (!clickText(MODEL)) {" +
+
+                "         report(" +
+                "'ERROR'," +
+                "'Не намерих модел: '+MODEL" +
+                ");" +
+
+                "         return;" +
+                "      }" +
+
+                "      report(" +
+                "'MODEL_OK'," +
+                "'Избран модел: '+MODEL" +
+                ");" +
+
+                // ===========================================
+                // YEAR
+                // ===========================================
+
+                "      setTimeout(function() {" +
+
+                "         if (YEAR) {" +
+
+                "            let yearControl=" +
+                "            clickable().find(function(el) {" +
+
+                "               const t=norm(text(el));" +
+
+                "               return " +
+                "               t==='year' || " +
+                "               t.includes('modelyear') || " +
+                "               t.includes('year');" +
+
+                "            });" +
+
+                "            if (yearControl) {" +
+
+                "               yearControl.click();" +
+
+                "               setTimeout(function() {" +
+
+                "                  if (clickText(YEAR)) {" +
+
+                "                     report(" +
+                "'YEAR_OK'," +
+                "'Избрана година: '+YEAR" +
+                ");" +
+
+                "                  } else {" +
+
+                "                     report(" +
+                "'YEAR_SKIP'," +
+                "'Не намерих директна година '+YEAR" +
+                ");" +
+                "                  }" +
+
+                "               },700);" +
+                "            }" +
+                "         }" +
+
+                // ===========================================
+                // FUEL
+                // ===========================================
+
+                "         setTimeout(function() {" +
+
+                "            if (FUEL) {" +
+
+                "               let fuelControl=" +
+                "               clickable().find(function(el) {" +
+
+                "                  const t=norm(text(el));" +
+
+                "                  return " +
+                "                  t==='fuel' || " +
+                "                  t.includes('fueltype') || " +
+                "                  t.includes('fuel');" +
+
+                "               });" +
+
+                "               if (fuelControl) {" +
+
+                "                  fuelControl.click();" +
+
+                "                  setTimeout(function() {" +
+
+                "                     if (" +
+                "                     clickText(FUEL)" +
+                "                     ) {" +
+
+                "                        report(" +
+                "'FUEL_OK'," +
+                "'Избрано гориво: '+FUEL" +
+                ");" +
+
+                "                     } else {" +
+
+                "                        report(" +
+                "'FUEL_SKIP'," +
+                "'Не намерих гориво: '+FUEL" +
+                ");" +
+
+                "                     }" +
+
+                "                  },700);" +
+                "               }" +
+                "            }" +
+
+                // ===========================================
+                // FINISH
+                // ===========================================
+
+                "            setTimeout(function() {" +
+
+                "               report(" +
+                "'DONE'," +
+                "'Филтрите са приложени'" +
+                ");" +
+
+                "            },1200);" +
+
+                "         },900);" +
+
+                "      },900);" +
+
+                "   },900);" +
+
+                " },900);" +
+
+                "},700);" +
 
                 "})();";
 
@@ -956,242 +1080,89 @@ public class MainActivity extends Activity {
         );
     }
 
-    // ============================================================
-    // RECEIVE CAR
-    // ============================================================
+    private String jsEscape(
+            String value
+    ) {
 
-    private class CarReader {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .replace(
+                        "\\",
+                        "\\\\"
+                )
+                .replace(
+                        "'",
+                        "\\'"
+                )
+                .replace(
+                        "\n",
+                        " "
+                );
+    }
+
+    // =========================================================
+    // ANDROID <-> JAVASCRIPT
+    // =========================================================
+
+    private class SearchBridge {
 
         @JavascriptInterface
-        public void receiveCar(
-                String json
+        public void onStatus(
+                String message
         ) {
 
             runOnUiThread(() -> {
 
-                try {
+                String[] parts =
+                        message.split(
+                                "\\|",
+                                2
+                        );
 
-                    JSONObject obj =
-                            new JSONObject(json);
+                String step =
+                        parts.length > 0
+                                ? parts[0]
+                                : "";
 
-                    if (obj.has("error")) {
+                String msg =
+                        parts.length > 1
+                                ? parts[1]
+                                : message;
 
-                        if (
-                                readAttempts <
-                                        MAX_READ_ATTEMPTS
-                        ) {
+                status.setText(
+                        msg
+                );
 
-                            status.setText(
-                                    "Обявите още се зареждат... " +
-                                    readAttempts +
-                                    "/" +
-                                    MAX_READ_ATTEMPTS
-                            );
+                if (
+                        step.equals(
+                                "DONE"
+                        )
+                ) {
 
-                            handler.postDelayed(
-                                    () -> readFirstCar(),
-                                    1000
-                            );
-
-                        } else {
-
-                            status.setText(
-                                    "Не намерих обява след " +
-                                    MAX_READ_ATTEMPTS +
-                                    " опита."
-                            );
-                        }
-
-                        return;
-                    }
-
-                    String carId =
-                            obj.optString(
-                                    "carId"
-                            );
-
-                    String year =
-                            obj.optString(
-                                    "year"
-                            );
-
-                    String mileage =
-                            obj.optString(
-                                    "mileage"
-                            );
-
-                    String fuel =
-                            obj.optString(
-                                    "fuel"
-                            );
-
-                    String priceKrw =
-                            obj.optString(
-                                    "priceKrw"
-                            );
-
-                    String priceUsd =
-                            obj.optString(
-                                    "priceUsd"
-                            );
-
-                    String url =
-                            obj.optString(
-                                    "url"
-                            );
-
-                    String raw =
-                            obj.optString(
-                                    "text"
-                            );
-
-                    String priceText;
-
-                    if (!priceKrw.isEmpty()) {
-
-                        priceText =
-                                priceKrw +
-                                " 만원";
-
-                    } else if (
-                            !priceUsd.isEmpty()
-                    ) {
-
-                        priceText =
-                                priceUsd +
-                                " USD";
-
-                    } else {
-
-                        priceText =
-                                "не е разпозната";
-                    }
-
-                    lastResult =
-                            "ПЪРВА ОБЯВА\n\n" +
-
-                            "ID: " +
-                            carId +
-                            "\n" +
-
-                            "Година: " +
-                            year +
-                            "\n" +
-
-                            "Пробег: " +
-                            mileage +
-                            " km\n" +
-
-                            "Гориво: " +
-                            fuel +
-                            "\n" +
-
-                            "Цена: " +
-                            priceText +
-                            "\n\n" +
-
-                            "LINK:\n" +
-                            url +
-                            "\n\n" +
-
-                            "RAW:\n" +
-                            raw;
-
-                    status.setText(
-                            lastResult
-                    );
-
-                } catch (Exception e) {
-
-                    status.setText(
-                            "Грешка при четене: " +
-                            e.getMessage()
-                    );
+                    pendingCommand = null;
                 }
             });
         }
     }
 
-    // ============================================================
-    // COPY
-    // ============================================================
+    // =========================================================
+    // COMMAND CLASS
+    // =========================================================
 
-    private void copyResult() {
+    private static class SearchCommand {
 
-        String text =
-                lastResult;
-
-        if (
-                text == null ||
-                text.isEmpty()
-        ) {
-
-            text =
-                    status
-                            .getText()
-                            .toString();
-        }
-
-        ClipboardManager clipboard =
-                (ClipboardManager)
-                        getSystemService(
-                                Context
-                                        .CLIPBOARD_SERVICE
-                        );
-
-        ClipData clip =
-                ClipData.newPlainText(
-                        "Encar result",
-                        text
-                );
-
-        clipboard.setPrimaryClip(
-                clip
-        );
-
-        if (
-                lastResult != null &&
-                !lastResult.isEmpty()
-        ) {
-
-            status.setText(
-                    lastResult +
-                    "\n\nКОПИРАНО ✅"
-            );
-
-        } else {
-
-            status.setText(
-                    text +
-                    "\n\nКОПИРАНО ✅"
-            );
-        }
-    }
-
-    // ============================================================
-    // SEARCH PARAMETERS
-    // ============================================================
-
-    private static class SearchParameters {
-
-        String manufacturer = "";
-        String modelGroup = "";
+        String brand = "";
         String model = "";
-
-        String brandDisplay = "";
-        String modelDisplay = "";
-
         String year = "";
-
         String fuel = "";
-        String fuelDisplay = "";
-
-        String error = null;
     }
 
-    // ============================================================
+    // =========================================================
     // BACK
-    // ============================================================
+    // =========================================================
 
     @Override
     public void onBackPressed() {
