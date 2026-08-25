@@ -2,72 +2,112 @@ package com.encarvoicesearch;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
-import android.graphics.Bitmap;
+import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
+import android.speech.RecognizerIntent;
+import android.view.Gravity;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
 
-    private WebView webView;
+    private static final int VOICE_REQUEST = 7001;
+
+    private static final String ENCAR_BASE =
+            "https://m.encar.com/ca/search.do#!";
+
+    private EditText searchInput;
     private TextView statusText;
+    private WebView webView;
 
-    private final StringBuilder scanLog = new StringBuilder();
-
-    private volatile boolean scanning = true;
-
-    private static final String START_URL =
-            "https://m.encar.com/ca/search.do";
-
-    private static final String TARGET_SEARCH_API =
-            "api.encar.com/search/car/list/mobile";
-
-    private final Object responseLock = new Object();
-
-    private final Map<String, ResponseCapture> responses =
-            new HashMap<>();
+    private final List<BrandRule> brands = new ArrayList<>();
+    private final List<ModelRule> models = new ArrayList<>();
 
 
-    private static class ResponseCapture {
+    private static class BrandRule {
 
-        String source;
-        String method;
-        String url;
-        int status;
-        String contentType;
+        final String key;
+        final String encar;
+        final String[] aliases;
 
-        StringBuilder body =
-                new StringBuilder();
+        BrandRule(
+                String key,
+                String encar,
+                String... aliases
+        ) {
+            this.key = key;
+            this.encar = encar;
+            this.aliases = aliases;
+        }
     }
 
 
-    @SuppressLint({
-            "SetJavaScriptEnabled",
-            "JavascriptInterface"
-    })
+    private static class ModelRule {
+
+        final String brandKey;
+        final String encar;
+        final String[] aliases;
+
+        ModelRule(
+                String brandKey,
+                String encar,
+                String... aliases
+        ) {
+            this.brandKey = brandKey;
+            this.encar = encar;
+            this.aliases = aliases;
+        }
+    }
+
+
+    private static class SearchSpec {
+
+        String raw;
+
+        BrandRule brand;
+
+        String modelGroup;
+
+        String fuel;
+
+        Integer yearFrom;
+        Integer yearTo;
+
+        Integer maxMileage;
+
+        Integer maxPriceManWon;
+
+        String sort = "MobileModifiedDate";
+    }
+
+
+    @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
         super.onCreate(savedInstanceState);
+
+        initRules();
 
         createUi();
 
@@ -77,145 +117,27 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-
-        settings.setJavaScriptCanOpenWindowsAutomatically(true);
-
         settings.setLoadsImagesAutomatically(true);
-
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
 
-        settings.setAllowContentAccess(true);
-        settings.setAllowFileAccess(true);
+        CookieManager
+                .getInstance()
+                .setAcceptCookie(true);
 
-        CookieManager cookieManager =
-                CookieManager.getInstance();
-
-        cookieManager.setAcceptCookie(true);
-
-        cookieManager.setAcceptThirdPartyCookies(
-                webView,
-                true
-        );
-
-
-        webView.addJavascriptInterface(
-                new NetworkBridge(),
-                "AndroidNetworkScanner"
-        );
-
+        CookieManager
+                .getInstance()
+                .setAcceptThirdPartyCookies(
+                        webView,
+                        true
+                );
 
         webView.setWebViewClient(
-                new WebViewClient() {
-
-                    @Override
-                    public void onPageStarted(
-                            WebView view,
-                            String url,
-                            Bitmap favicon
-                    ) {
-
-                        super.onPageStarted(
-                                view,
-                                url,
-                                favicon
-                        );
-
-                        if (
-                                scanning &&
-                                url != null
-                        ) {
-
-                            appendLog(
-                                    "\n------------------------------\n" +
-                                    "PAGE STARTED\n" +
-                                    url + "\n"
-                            );
-                        }
-                    }
-
-
-                    @Override
-                    public void onPageFinished(
-                            WebView view,
-                            String url
-                    ) {
-
-                        super.onPageFinished(
-                                view,
-                                url
-                        );
-
-                        injectNetworkInterceptor();
-
-
-                        webView.postDelayed(
-                                new Runnable() {
-
-                                    @Override
-                                    public void run() {
-
-                                        injectNetworkInterceptor();
-                                    }
-                                },
-                                1000
-                        );
-
-
-                        statusText.setText(
-                                "SCANNER ACTIVE - промени филтър в Encar"
-                        );
-                    }
-
-
-                    @Override
-                    public WebResourceResponse shouldInterceptRequest(
-                            WebView view,
-                            WebResourceRequest request
-                    ) {
-
-                        if (
-                                scanning &&
-                                request != null &&
-                                request.getUrl() != null
-                        ) {
-
-                            String url =
-                                    request
-                                            .getUrl()
-                                            .toString();
-
-                            if (
-                                    url.contains(
-                                            TARGET_SEARCH_API
-                                    )
-                            ) {
-
-                                appendLog(
-                                        "\n==============================\n" +
-                                        "WEBVIEW REQUEST\n" +
-                                        "METHOD: " +
-                                        request.getMethod() +
-                                        "\nURL:\n" +
-                                        url +
-                                        "\n==============================\n"
-                                );
-                            }
-                        }
-
-                        return super.shouldInterceptRequest(
-                                view,
-                                request
-                        );
-                    }
-                }
+                new WebViewClient()
         );
 
-
-        startNewScan();
-
         webView.loadUrl(
-                START_URL
+                "https://m.encar.com/ca/search.do"
         );
     }
 
@@ -234,84 +156,114 @@ public class MainActivity extends Activity {
         );
 
 
-        LinearLayout controls =
+        TextView title =
+                new TextView(this);
+
+        title.setText(
+                "ENCAR VOICE SEARCH"
+        );
+
+        title.setTextSize(20f);
+
+        title.setTextColor(
+                Color.BLACK
+        );
+
+        title.setGravity(
+                Gravity.CENTER
+        );
+
+        title.setPadding(
+                16,
+                14,
+                16,
+                8
+        );
+
+
+        searchInput =
+                new EditText(this);
+
+        searchInput.setHint(
+                "Напр.: Mercedes GLE 2024 diesel до 100 000 km най-евтини"
+        );
+
+        searchInput.setTextSize(16f);
+
+        searchInput.setTextColor(
+                Color.BLACK
+        );
+
+        searchInput.setHintTextColor(
+                Color.GRAY
+        );
+
+        searchInput.setMinLines(2);
+
+        searchInput.setMaxLines(4);
+
+        searchInput.setPadding(
+                20,
+                12,
+                20,
+                12
+        );
+
+
+        LinearLayout buttons =
                 new LinearLayout(this);
 
-        controls.setOrientation(
+        buttons.setOrientation(
                 LinearLayout.HORIZONTAL
         );
 
 
-        Button startButton =
+        Button voiceButton =
                 new Button(this);
 
-        startButton.setText("START");
+        voiceButton.setText(
+                "🎤 ГЛАС"
+        );
+
+        voiceButton.setOnClickListener(
+                v -> startVoiceInput()
+        );
 
 
-        Button stopButton =
+        Button searchButton =
                 new Button(this);
 
-        stopButton.setText("STOP");
+        searchButton.setText(
+                "🔎 ТЪРСИ"
+        );
 
-
-        Button copyButton =
-                new Button(this);
-
-        copyButton.setText("COPY");
+        searchButton.setOnClickListener(
+                v -> runSearch()
+        );
 
 
         Button clearButton =
                 new Button(this);
 
-        clearButton.setText("CLEAR");
-
-
-        startButton.setOnClickListener(
-                v -> {
-
-                    startNewScan();
-
-                    Toast.makeText(
-                            this,
-                            "Scan started",
-                            Toast.LENGTH_SHORT
-                    ).show();
-                }
+        clearButton.setText(
+                "ИЗЧИСТИ"
         );
-
-
-        stopButton.setOnClickListener(
-                v -> stopScan()
-        );
-
-
-        copyButton.setOnClickListener(
-                v -> copyScan()
-        );
-
 
         clearButton.setOnClickListener(
                 v -> {
 
-                    synchronized (scanLog) {
-
-                        scanLog.setLength(0);
-                    }
+                    searchInput.setText("");
 
                     statusText.setText(
-                            "Log cleared"
+                            "Готово за ново търсене"
                     );
 
-                    Toast.makeText(
-                            this,
-                            "Log cleared",
-                            Toast.LENGTH_SHORT
-                    ).show();
+                    searchInput.requestFocus();
                 }
         );
 
 
-        LinearLayout.LayoutParams buttonParams =
+        LinearLayout.LayoutParams bp =
                 new LinearLayout.LayoutParams(
                         0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -319,24 +271,19 @@ public class MainActivity extends Activity {
                 );
 
 
-        controls.addView(
-                startButton,
-                buttonParams
+        buttons.addView(
+                voiceButton,
+                bp
         );
 
-        controls.addView(
-                stopButton,
-                buttonParams
+        buttons.addView(
+                searchButton,
+                bp
         );
 
-        controls.addView(
-                copyButton,
-                buttonParams
-        );
-
-        controls.addView(
+        buttons.addView(
                 clearButton,
-                buttonParams
+                bp
         );
 
 
@@ -344,16 +291,24 @@ public class MainActivity extends Activity {
                 new TextView(this);
 
         statusText.setText(
-                "Scanner loading..."
+                "Кажи или напиши марка, модел и филтри"
         );
 
-        statusText.setTextSize(14f);
+        statusText.setTextSize(13f);
+
+        statusText.setTextColor(
+                Color.DKGRAY
+        );
 
         statusText.setPadding(
                 16,
-                10,
+                8,
                 16,
-                10
+                8
+        );
+
+        statusText.setTextIsSelectable(
+                true
         );
 
 
@@ -362,7 +317,25 @@ public class MainActivity extends Activity {
 
 
         root.addView(
-                controls,
+                title,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+
+        root.addView(
+                searchInput,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+
+        root.addView(
+                buttons,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
@@ -393,91 +366,115 @@ public class MainActivity extends Activity {
     }
 
 
-    private void startNewScan() {
+    private void startVoiceInput() {
 
-        scanning = true;
-
-        synchronized (scanLog) {
-
-            scanLog.setLength(0);
-
-            scanLog.append(
-                    "===== ENCAR NETWORK SCAN =====\n"
-            );
-
-            scanLog.append(
-                    "STARTED: "
-            );
-
-            scanLog.append(
-                    currentTime()
-            );
-
-            scanLog.append(
-                    "\n\n"
-            );
-        }
+        Intent intent =
+                new Intent(
+                        RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+                );
 
 
-        synchronized (responseLock) {
-
-            responses.clear();
-        }
-
-
-        statusText.setText(
-                "SCANNING..."
-        );
-    }
-
-
-    private void stopScan() {
-
-        if (!scanning) {
-            return;
-        }
-
-
-        appendLog(
-                "\n==============================\n" +
-                "SCAN STOPPED\n" +
-                currentTime() +
-                "\n==============================\n"
+        intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
         );
 
 
-        scanning = false;
-
-
-        statusText.setText(
-                "SCAN STOPPED"
+        intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                "bg-BG"
         );
 
 
-        Toast.makeText(
-                this,
-                "Scan stopped",
-                Toast.LENGTH_SHORT
-        ).show();
-    }
+        intent.putExtra(
+                RecognizerIntent.EXTRA_PROMPT,
+                "Кажи марка, модел, година, гориво и пробег"
+        );
 
 
-    private void copyScan() {
+        try {
 
-        String text;
+            startActivityForResult(
+                    intent,
+                    VOICE_REQUEST
+            );
 
-        synchronized (scanLog) {
-
-            text =
-                    scanLog.toString();
-        }
-
-
-        if (text.trim().isEmpty()) {
+        } catch (
+                ActivityNotFoundException e
+        ) {
 
             Toast.makeText(
                     this,
-                    "Nothing to copy",
+                    "На телефона няма активна услуга за гласово разпознаване",
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+
+        super.onActivityResult(
+                requestCode,
+                resultCode,
+                data
+        );
+
+
+        if (
+                requestCode == VOICE_REQUEST
+                        &&
+                resultCode == RESULT_OK
+                        &&
+                data != null
+        ) {
+
+            ArrayList<String> results =
+                    data.getStringArrayListExtra(
+                            RecognizerIntent.EXTRA_RESULTS
+                    );
+
+
+            if (
+                    results != null
+                            &&
+                    !results.isEmpty()
+            ) {
+
+                searchInput.setText(
+                        results.get(0)
+                );
+
+                searchInput.setSelection(
+                        searchInput
+                                .getText()
+                                .length()
+                );
+            }
+        }
+    }
+
+
+    private void runSearch() {
+
+        String raw =
+                searchInput
+                        .getText()
+                        .toString()
+                        .trim();
+
+
+        if (raw.isEmpty()) {
+
+            Toast.makeText(
+                    this,
+                    "Напиши или кажи каква кола търсиш",
                     Toast.LENGTH_SHORT
             ).show();
 
@@ -485,850 +482,1804 @@ public class MainActivity extends Activity {
         }
 
 
-        ClipboardManager clipboard =
-                (ClipboardManager)
-                        getSystemService(
-                                Context.CLIPBOARD_SERVICE
-                        );
+        hideKeyboard();
 
 
-        clipboard.setPrimaryClip(
-                ClipData.newPlainText(
-                        "ENCAR NETWORK SCAN",
-                        text
-                )
+        SearchSpec spec =
+                parseQuery(raw);
+
+
+        String action =
+                buildAction(spec);
+
+
+        String url =
+                buildEncarUrl(
+                        spec,
+                        action
+                );
+
+
+        statusText.setText(
+                buildStatus(spec)
         );
 
 
-        Toast.makeText(
-                this,
-                "Scan copied",
-                Toast.LENGTH_SHORT
-        ).show();
+        webView.loadUrl(url);
     }
 
 
-    private void appendLog(
-            String text
+    private SearchSpec parseQuery(
+            String raw
     ) {
 
-        if (!scanning) {
-            return;
-        }
+        SearchSpec spec =
+                new SearchSpec();
 
+        spec.raw = raw;
 
-        synchronized (scanLog) {
 
-            scanLog.append(text);
+        String n =
+                normalize(raw);
 
-            if (!text.endsWith("\n")) {
 
-                scanLog.append("\n");
-            }
-        }
-    }
+        spec.brand =
+                findBrand(n);
 
-
-    private String currentTime() {
-
-        return new SimpleDateFormat(
-                "yyyy-MM-dd HH:mm:ss",
-                Locale.getDefault()
-        ).format(
-                new Date()
-        );
-    }
-
-
-    private void injectNetworkInterceptor() {
-
-        String js =
-
-                "(function() {" +
-
-                "if(window.__ENCAR_RESPONSE_SCANNER__===true){" +
-                "return;" +
-                "}" +
-
-                "window.__ENCAR_RESPONSE_SCANNER__=true;" +
-
-
-                "var TARGET='api.encar.com/search/car/list/mobile';" +
-
-                "var responseCounter=0;" +
-
-
-                "function absUrl(u){" +
-
-                "try{" +
-
-                "return new URL(String(u||''),window.location.href).href;" +
-
-                "}catch(e){" +
-
-                "return String(u||'');" +
-
-                "}" +
-
-                "}" +
-
-
-                "function isTarget(u){" +
-
-                "var x=absUrl(u);" +
-
-                "return x.indexOf(TARGET)!==-1;" +
-
-                "}" +
-
-
-                "function safeString(v){" +
-
-                "if(v===undefined||v===null){" +
-                "return '';" +
-                "}" +
-
-                "try{" +
-
-                "if(typeof v==='string'){" +
-                "return v;" +
-                "}" +
-
-                "return JSON.stringify(v);" +
-
-                "}catch(e){" +
-
-                "try{" +
-                "return String(v);" +
-                "}catch(e2){" +
-                "return '';" +
-                "}" +
-
-                "}" +
-
-                "}" +
-
-
-                "function reportRequest(source,method,url,body){" +
-
-                "url=absUrl(url);" +
-
-                "if(!isTarget(url)){" +
-                "return;" +
-                "}" +
-
-                "try{" +
-
-                "window.AndroidNetworkScanner.onRequest(" +
-
-                "String(source||'')," +
-
-                "String(method||'GET')," +
-
-                "String(url||'')," +
-
-                "safeString(body)" +
-
-                ");" +
-
-                "}catch(e){}" +
-
-                "}" +
-
-
-                "function reportResponse(" +
-                "source," +
-                "method," +
-                "url," +
-                "status," +
-                "contentType," +
-                "body" +
-                "){" +
-
-                "url=absUrl(url);" +
-
-                "if(!isTarget(url)){" +
-                "return;" +
-                "}" +
-
-                "body=String(body||'');" +
-
-                "responseCounter++;" +
-
-                "var id='R'+Date.now()+'_'+responseCounter;" +
-
-                "try{" +
-
-                "window.AndroidNetworkScanner.onResponseStart(" +
-
-                "id," +
-
-                "String(source||'')," +
-
-                "String(method||'GET')," +
-
-                "String(url||'')," +
-
-                "Number(status||0)," +
-
-                "String(contentType||'')," +
-
-                "body.length" +
-
-                ");" +
-
-
-                "var chunkSize=30000;" +
-
-                "for(" +
-                "var i=0;" +
-                "i<body.length;" +
-                "i+=chunkSize" +
-                "){" +
-
-                "window.AndroidNetworkScanner.onResponseChunk(" +
-
-                "id," +
-
-                "body.substring(" +
-                "i," +
-                "Math.min(i+chunkSize,body.length)" +
-                ")" +
-
-                ");" +
-
-                "}" +
-
-
-                "window.AndroidNetworkScanner.onResponseEnd(id);" +
-
-                "}catch(e){}" +
-
-                "}" +
-
-
-                "if(window.fetch){" +
-
-                "var originalFetch=window.fetch;" +
-
-
-                "window.fetch=async function(input,init){" +
-
-                "var url='';" +
-                "var method='GET';" +
-                "var requestBody='';" +
-
-
-                "try{" +
-
-                "if(typeof input==='string'){" +
-
-                "url=input;" +
-
-                "}else if(input&&input.url){" +
-
-                "url=input.url;" +
-
-                "}" +
-
-
-                "if(init&&init.method){" +
-
-                "method=init.method;" +
-
-                "}else if(input&&input.method){" +
-
-                "method=input.method;" +
-
-                "}" +
-
-
-                "if(init&&init.body!==undefined){" +
-
-                "requestBody=init.body;" +
-
-                "}" +
-
-                "}catch(e){}" +
-
-
-                "reportRequest(" +
-                "'FETCH'," +
-                "method," +
-                "url," +
-                "requestBody" +
-                ");" +
-
-
-                "var response;" +
-
-
-                "try{" +
-
-                "response=await originalFetch.apply(this,arguments);" +
-
-                "}catch(error){" +
-
-                "if(isTarget(url)){" +
-
-                "reportResponse(" +
-                "'FETCH'," +
-                "method," +
-                "url," +
-                "0," +
-                "''," +
-                "'FETCH ERROR: '+String(error)" +
-                ");" +
-
-                "}" +
-
-                "throw error;" +
-
-                "}" +
-
-
-                "try{" +
-
-                "if(isTarget(url)){" +
-
-                "var clone=response.clone();" +
-
-                "var contentType='';" +
-
-
-                "try{" +
-
-                "contentType=" +
-                "response.headers.get('content-type')||'';" +
-
-                "}catch(e){}" +
-
-
-                "clone.text()" +
-
-                ".then(function(text){" +
-
-                "reportResponse(" +
-                "'FETCH'," +
-                "method," +
-                "url," +
-                "response.status," +
-                "contentType," +
-                "text" +
-                ");" +
-
-                "})" +
-
-                ".catch(function(error){" +
-
-                "reportResponse(" +
-                "'FETCH'," +
-                "method," +
-                "url," +
-                "response.status," +
-                "contentType," +
-                "'READ ERROR: '+String(error)" +
-                ");" +
-
-                "});" +
-
-                "}" +
-
-                "}catch(e){" +
-
-                "if(isTarget(url)){" +
-
-                "reportResponse(" +
-                "'FETCH'," +
-                "method," +
-                "url," +
-                "response?response.status:0," +
-                "''," +
-                "'CLONE ERROR: '+String(e)" +
-                ");" +
-
-                "}" +
-
-                "}" +
-
-
-                "return response;" +
-
-                "};" +
-
-                "}" +
-
-
-                "if(window.XMLHttpRequest){" +
-
-                "var originalOpen=" +
-                "XMLHttpRequest.prototype.open;" +
-
-                "var originalSend=" +
-                "XMLHttpRequest.prototype.send;" +
-
-
-                "XMLHttpRequest.prototype.open=" +
-
-                "function(method,url){" +
-
-                "this.__encarMethod=method||'GET';" +
-
-                "this.__encarUrl=url||'';" +
-
-                "return originalOpen.apply(this,arguments);" +
-
-                "};" +
-
-
-                "XMLHttpRequest.prototype.send=" +
-
-                "function(body){" +
-
-                "var xhr=this;" +
-
-                "var method=xhr.__encarMethod||'GET';" +
-
-                "var url=xhr.__encarUrl||'';" +
-
-
-                "reportRequest(" +
-                "'XHR'," +
-                "method," +
-                "url," +
-                "body" +
-                ");" +
-
-
-                "if(isTarget(url)){" +
-
-                "xhr.addEventListener(" +
-                "'loadend'," +
-
-                "function(){" +
-
-                "var responseBody='';" +
-
-                "var contentType='';" +
-
-
-                "try{" +
-
-                "contentType=" +
-                "xhr.getResponseHeader('content-type')||'';" +
-
-                "}catch(e){}" +
-
-
-                "try{" +
-
-                "if(" +
-                "xhr.responseType===''||" +
-                "xhr.responseType==='text'" +
-                "){" +
-
-                "responseBody=xhr.responseText||'';" +
-
-                "}else if(xhr.responseType==='json'){" +
-
-                "responseBody=JSON.stringify(xhr.response);" +
-
-                "}else{" +
-
-                "responseBody=safeString(xhr.response);" +
-
-                "}" +
-
-                "}catch(e){" +
-
-                "responseBody=" +
-                "'XHR READ ERROR: '+String(e);" +
-
-                "}" +
-
-
-                "reportResponse(" +
-                "'XHR'," +
-                "method," +
-                "url," +
-                "xhr.status," +
-                "contentType," +
-                "responseBody" +
-                ");" +
-
-                "}" +
-
-                ");" +
-
-                "}" +
-
-
-                "return originalSend.apply(this,arguments);" +
-
-                "};" +
-
-                "}" +
-
-
-                "console.log('ENCAR RESPONSE SCANNER INSTALLED');" +
-
-                "})();";
-
-
-        webView.evaluateJavascript(
-                js,
-                null
-        );
-    }
-
-
-    public class NetworkBridge {
-
-
-        @JavascriptInterface
-        public void onRequest(
-                String source,
-                String method,
-                String url,
-                String body
-        ) {
-
-            if (!scanning) {
-                return;
-            }
-
-
-            if (
-                    url == null ||
-                    !url.contains(
-                            TARGET_SEARCH_API
-                    )
-            ) {
-
-                return;
-            }
-
-
-            StringBuilder block =
-                    new StringBuilder();
-
-
-            block.append(
-                    "\n========================================\n"
-            );
-
-            block.append(
-                    "===== ENCAR SEARCH API REQUEST =====\n"
-            );
-
-            block.append(
-                    "SOURCE: "
-            );
-
-            block.append(source);
-
-            block.append(
-                    "\nMETHOD: "
-            );
-
-            block.append(method);
-
-            block.append(
-                    "\nURL:\n"
-            );
-
-            block.append(url);
-
-            block.append("\n");
-
-
-            if (
-                    body != null &&
-                    !body.trim().isEmpty()
-            ) {
-
-                block.append(
-                        "\nREQUEST BODY:\n"
-                );
-
-                block.append(body);
-
-                block.append("\n");
-            }
-
-
-            block.append(
-                    "===== END REQUEST =====\n"
-            );
-
-            block.append(
-                    "========================================\n"
-            );
-
-
-            appendLog(
-                    block.toString()
-            );
-        }
-
-
-        @JavascriptInterface
-        public void onResponseStart(
-                String id,
-                String source,
-                String method,
-                String url,
-                int status,
-                String contentType,
-                int bodyLength
-        ) {
-
-            if (!scanning) {
-                return;
-            }
-
-
-            if (
-                    url == null ||
-                    !url.contains(
-                            TARGET_SEARCH_API
-                    )
-            ) {
-
-                return;
-            }
-
-
-            ResponseCapture capture =
-                    new ResponseCapture();
-
-
-            capture.source =
-                    source;
-
-            capture.method =
-                    method;
-
-            capture.url =
-                    url;
-
-            capture.status =
-                    status;
-
-            capture.contentType =
-                    contentType;
-
-
-            synchronized (responseLock) {
-
-                responses.put(
-                        id,
-                        capture
-                );
-            }
-        }
-
-
-        @JavascriptInterface
-        public void onResponseChunk(
-                String id,
-                String chunk
-        ) {
-
-            if (!scanning) {
-                return;
-            }
-
-
-            synchronized (responseLock) {
-
-                ResponseCapture capture =
-                        responses.get(id);
-
-                if (capture == null) {
-                    return;
-                }
-
-
-                if (chunk != null) {
-
-                    capture.body.append(
-                            chunk
-                    );
-                }
-            }
-        }
-
-
-        @JavascriptInterface
-        public void onResponseEnd(
-                String id
-        ) {
-
-            if (!scanning) {
-                return;
-            }
-
-
-            ResponseCapture capture;
-
-
-            synchronized (responseLock) {
-
-                capture =
-                        responses.remove(id);
-            }
-
-
-            if (capture == null) {
-                return;
-            }
-
-
-            StringBuilder block =
-                    new StringBuilder();
-
-
-            block.append(
-                    "\n\n========================================\n"
-            );
-
-            block.append(
-                    "===== ENCAR SEARCH API RESPONSE =====\n"
-            );
-
-            block.append(
-                    "========================================\n"
-            );
-
-
-            block.append(
-                    "SOURCE: "
-            );
-
-            block.append(
-                    capture.source
-            );
-
-
-            block.append(
-                    "\nMETHOD: "
-            );
-
-            block.append(
-                    capture.method
-            );
-
-
-            block.append(
-                    "\nSTATUS: "
-            );
-
-            block.append(
-                    capture.status
-            );
-
-
-            block.append(
-                    "\nCONTENT-TYPE: "
-            );
-
-            block.append(
-                    capture.contentType
-            );
-
-
-            block.append(
-                    "\nURL:\n"
-            );
-
-            block.append(
-                    capture.url
-            );
-
-
-            block.append(
-                    "\n\nRESPONSE BODY:\n"
-            );
-
-            block.append(
-                    capture.body
-            );
-
-
-            block.append(
-                    "\n\n===== END ENCAR SEARCH API RESPONSE =====\n"
-            );
-
-            block.append(
-                    "========================================\n"
-            );
-
-
-            appendLog(
-                    block.toString()
-            );
-
-
-            runOnUiThread(
-                    new Runnable() {
-
-                        @Override
-                        public void run() {
-
-                            statusText.setText(
-                                    "JSON CAPTURED - STOP + COPY"
-                            );
-
-
-                            Toast.makeText(
-                                    MainActivity.this,
-                                    "ENCAR JSON captured",
-                                    Toast.LENGTH_LONG
-                            ).show();
-                        }
-                    }
-            );
-        }
-    }
-
-
-    @Override
-    public void onBackPressed() {
 
         if (
-                webView != null &&
-                webView.canGoBack()
+                spec.brand != null
         ) {
 
-            webView.goBack();
+            spec.modelGroup =
+                    resolveModelGroup(
+                            spec.brand.key,
+                            n,
+                            raw
+                    );
+        }
+
+
+        spec.fuel =
+                detectFuel(n);
+
+
+        List<Integer> years =
+                extractYears(raw);
+
+
+        if (
+                years.size() == 1
+        ) {
+
+            spec.yearFrom =
+                    years.get(0);
+
+            spec.yearTo =
+                    years.get(0);
+
+        } else if (
+                years.size() >= 2
+        ) {
+
+            spec.yearFrom =
+                    Collections.min(
+                            years
+                    );
+
+            spec.yearTo =
+                    Collections.max(
+                            years
+                    );
+        }
+
+
+        spec.maxMileage =
+                extractMaxMileage(n);
+
+
+        spec.maxPriceManWon =
+                extractMaxPriceManWon(n);
+
+
+        if (
+                containsAny(
+                        n,
+                        "най евтини",
+                        "най-евтини",
+                        "евтини първо",
+                        "lowest price",
+                        "price asc",
+                        "cheapest"
+                )
+        ) {
+
+            spec.sort =
+                    "MobilePriceAsc";
 
         } else {
 
-            super.onBackPressed();
+            spec.sort =
+                    "MobileModifiedDate";
         }
+
+
+        return spec;
     }
 
 
-    @Override
-    protected void onDestroy() {
+    private String buildAction(
+            SearchSpec spec
+    ) {
 
-        if (webView != null) {
+        List<String> parts =
+                new ArrayList<>();
 
-            try {
 
-                webView.removeJavascriptInterface(
-                        "AndroidNetworkScanner"
-                );
+        parts.add(
+                "Hidden.N."
+        );
 
-                webView.stopLoading();
+        parts.add(
+                "MultiViewHidden.N."
+        );
 
-                webView.destroy();
+        parts.add(
+                "SellType.일반."
+        );
 
-            } catch (Exception ignored) {
+
+        if (
+                spec.maxMileage != null
+        ) {
+
+            parts.add(
+                    "Mileage.range(.."
+                            +
+                    spec.maxMileage
+                            +
+                    ")."
+            );
+        }
+
+
+        if (
+                spec.maxPriceManWon != null
+        ) {
+
+            parts.add(
+                    "Price.range(.."
+                            +
+                    spec.maxPriceManWon
+                            +
+                    ")."
+            );
+        }
+
+
+        if (
+                spec.yearFrom != null
+                        &&
+                spec.yearTo != null
+        ) {
+
+            int from =
+                    spec.yearFrom * 100;
+
+            int to =
+                    spec.yearTo * 100 + 99;
+
+
+            parts.add(
+                    "Year.range("
+                            +
+                    from
+                            +
+                    ".."
+                            +
+                    to
+                            +
+                    ")."
+            );
+        }
+
+
+        if (
+                spec.fuel != null
+        ) {
+
+            parts.add(
+                    "FuelType."
+                            +
+                    spec.fuel
+                            +
+                    "."
+            );
+        }
+
+
+        parts.add(
+                buildCarBranch(spec)
+        );
+
+
+        return "(And."
+                +
+                String.join(
+                        "_.",
+                        parts
+                )
+                +
+                ")";
+    }
+
+
+    private String buildCarBranch(
+            SearchSpec spec
+    ) {
+
+        if (
+                spec.brand == null
+        ) {
+
+            return "(C.CarType.A.)";
+        }
+
+
+        String manufacturer =
+                spec.brand.encar;
+
+
+        if (
+                spec.modelGroup == null
+                        ||
+                spec.modelGroup
+                        .trim()
+                        .isEmpty()
+        ) {
+
+            return "(C.CarType.A._.(C.Manufacturer."
+                    +
+                    manufacturer
+                    +
+                    ".))";
+        }
+
+
+        return "(C.CarType.A._.(C.Manufacturer."
+                +
+                manufacturer
+                +
+                "._.(C.ModelGroup."
+                +
+                spec.modelGroup
+                +
+                ".)))";
+    }
+
+
+    private String buildEncarUrl(
+            SearchSpec spec,
+            String action
+    ) {
+
+        String json =
+                "{"
+                        +
+                "\"type\":\"car\","
+                        +
+                "\"action\":\""
+                        +
+                jsonEscape(action)
+                        +
+                "\","
+                        +
+                "\"title\":\""
+                        +
+                jsonEscape(spec.raw)
+                        +
+                "\","
+                        +
+                "\"toggle\":{},"
+                        +
+                "\"layer\":\"\","
+                        +
+                "\"sort\":\""
+                        +
+                jsonEscape(
+                        spec.sort
+                )
+                        +
+                "\""
+                        +
+                "}";
+
+
+        return ENCAR_BASE
+                +
+                Uri.encode(json);
+    }
+
+
+    private String buildStatus(
+            SearchSpec spec
+    ) {
+
+        StringBuilder s =
+                new StringBuilder();
+
+
+        if (
+                spec.brand != null
+        ) {
+
+            s.append("Марка: ")
+                    .append(
+                            spec.brand.encar
+                    );
+
+        } else {
+
+            s.append(
+                    "Марка: всички"
+            );
+        }
+
+
+        if (
+                spec.modelGroup != null
+        ) {
+
+            s.append(
+                    " | Модел: "
+            )
+                    .append(
+                            spec.modelGroup
+                    );
+        }
+
+
+        if (
+                spec.yearFrom != null
+        ) {
+
+            if (
+                    spec.yearFrom.equals(
+                            spec.yearTo
+                    )
+            ) {
+
+                s.append(
+                        " | Година: "
+                )
+                        .append(
+                                spec.yearFrom
+                        );
+
+            } else {
+
+                s.append(
+                        " | Години: "
+                )
+                        .append(
+                                spec.yearFrom
+                        )
+                        .append("-")
+                        .append(
+                                spec.yearTo
+                        );
             }
         }
 
-        super.onDestroy();
+
+        if (
+                spec.fuel != null
+        ) {
+
+            s.append(
+                    " | Гориво: "
+            )
+                    .append(
+                            spec.fuel
+                    );
+        }
+
+
+        if (
+                spec.maxMileage != null
+        ) {
+
+            s.append(
+                    " | До "
+            )
+                    .append(
+                            spec.maxMileage
+                    )
+                    .append(
+                            " km"
+                    );
+        }
+
+
+        if (
+                spec.maxPriceManWon != null
+        ) {
+
+            s.append(
+                    " | Цена до "
+            )
+                    .append(
+                            spec.maxPriceManWon
+                                    * 10000L
+                    )
+                    .append(
+                            " KRW"
+                    );
+        }
+
+
+        s.append(
+                " | 일반 | "
+        )
+                .append(
+                        "MobilePriceAsc"
+                                .equals(
+                                        spec.sort
+                                )
+                                ?
+                                "цена ↑"
+                                :
+                                "последно обновени"
+                );
+
+
+        if (
+                spec.brand != null
+                        &&
+                spec.modelGroup == null
+        ) {
+
+            s.append(
+                    "\nМоделът не беше разпознат точно — търся по марка и останалите филтри."
+            );
+        }
+
+
+        return s.toString();
     }
-}
+
+
+    private BrandRule findBrand(
+            String n
+    ) {
+
+        for (
+                BrandRule b : brands
+        ) {
+
+            for (
+                    String alias : b.aliases
+            ) {
+
+                if (
+                        containsAlias(
+                                n,
+                                alias
+                        )
+                ) {
+
+                    return b;
+                }
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private String resolveModelGroup(
+            String brandKey,
+            String normalized,
+            String raw
+    ) {
+
+        for (
+                ModelRule m : models
+        ) {
+
+            if (
+                    !m.brandKey
+                            .equals(
+                                    brandKey
+                            )
+            ) {
+
+                continue;
+            }
+
+
+            for (
+                    String alias : m.aliases
+            ) {
+
+                if (
+                        containsAlias(
+                                normalized,
+                                alias
+                        )
+                ) {
+
+                    return m.encar;
+                }
+            }
+        }
+
+
+        String special =
+                resolveSpecialModel(
+                        brandKey,
+                        normalized
+                );
+
+
+        if (
+                special != null
+        ) {
+
+            return special;
+        }
+
+
+        return guessModelGroup(
+                brandKey,
+                normalized,
+                raw
+        );
+    }
+
+
+    private String resolveSpecialModel(
+            String brandKey,
+            String n
+    ) {
+
+        if (
+                "mercedes"
+                        .equals(
+                                brandKey
+                        )
+        ) {
+
+            Matcher suv =
+                    Pattern.compile(
+                            "\\b(gl[abcse]|gle|glc|gls|gla|glb)\\s*\\d*[a-z]*\\b"
+                    )
+                            .matcher(n);
+
+
+            if (
+                    suv.find()
+            ) {
+
+                String x =
+                        suv.group(1)
+                                .toUpperCase(
+                                        Locale.ROOT
+                                );
+
+
+                return x
+                        +
+                        "-클래스";
+            }
+
+
+            Matcher classModel =
+                    Pattern.compile(
+                            "\\b([aces])\\s*\\d{3}[a-z]*\\b"
+                    )
+                            .matcher(n);
+
+
+            if (
+                    classModel.find()
+            ) {
+
+                return classModel
+                        .group(1)
+                        .toUpperCase(
+                                Locale.ROOT
+                        )
+                        +
+                        "-클래스";
+            }
+        }
+
+
+        if (
+                "bmw"
+                        .equals(
+                                brandKey
+                        )
+        ) {
+
+            Matcher series =
+                    Pattern.compile(
+                            "\\b([1-8])\\d{2}[a-z]{0,3}\\b"
+                    )
+                            .matcher(n);
+
+
+            if (
+                    series.find()
+            ) {
+
+                return series.group(1)
+                        +
+                        "시리즈";
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private String guessModelGroup(
+            String brandKey,
+            String n,
+            String raw
+    ) {
+
+        String cleaned =
+                n;
+
+
+        BrandRule brand =
+                null;
+
+
+        for (
+                BrandRule b : brands
+        ) {
+
+            if (
+                    b.key.equals(
+                            brandKey
+                    )
+            ) {
+
+                brand = b;
+
+                break;
+            }
+        }
+
+
+        if (
+                brand != null
+        ) {
+
+            for (
+                    String alias : brand.aliases
+            ) {
+
+                cleaned =
+                        cleaned.replace(
+                                normalize(alias),
+                                " "
+                        );
+            }
+        }
+
+
+        cleaned =
+                cleaned.replaceAll(
+                        "\\b(19\\d{2}|20\\d{2})\\b",
+                        " "
+                );
+
+
+        cleaned =
+                cleaned.replaceAll(
+                        "\\b\\d[\\d\\s.,]*\\s*(km|км|километра|километри|kilometers?)\\b",
+                        " "
+                );
+
+
+        String[] noise = {
+
+                "diesel",
+                "дизел",
+                "디젤",
+
+                "petrol",
+                "gasoline",
+                "бензин",
+                "가솔린",
+
+                "hybrid",
+                "хибрид",
+                "하이브리드",
+
+                "electric",
+                "електрическа",
+                "електрически",
+                "전기",
+
+                "до",
+                "под",
+                "max",
+                "maximum",
+
+                "най евтини",
+                "най-евтини",
+                "cheapest",
+
+                "търси",
+                "търсене",
+                "кола",
+                "автомобил",
+
+                "година",
+                "години",
+                "пробег"
+        };
+
+
+        for (
+                String x : noise
+        ) {
+
+            cleaned =
+                    cleaned.replace(
+                            normalize(x),
+                            " "
+                    );
+        }
+
+
+        cleaned =
+                cleaned.replaceAll(
+                        "\\s+",
+                        " "
+                )
+                        .trim();
+
+
+        Matcher latin =
+                Pattern.compile(
+                        "\\b[A-Za-z][A-Za-z0-9+.-]{1,14}\\b"
+                )
+                        .matcher(raw);
+
+
+        while (
+                latin.find()
+        ) {
+
+            String token =
+                    latin.group();
+
+
+            if (
+                    token.equalsIgnoreCase(
+                            "km"
+                    )
+                            ||
+                    token.equalsIgnoreCase(
+                            "diesel"
+                    )
+                            ||
+                    token.equalsIgnoreCase(
+                            "petrol"
+                    )
+                            ||
+                    token.equalsIgnoreCase(
+                            "gasoline"
+                    )
+                            ||
+                    token.equalsIgnoreCase(
+                            "hybrid"
+                    )
+                            ||
+                    token.equalsIgnoreCase(
+                            "electric"
+                    )
+            ) {
+
+                continue;
+            }
+
+
+            boolean isBrandAlias =
+                    false;
+
+
+            if (
+                    brand != null
+            ) {
+
+                for (
+                        String a : brand.aliases
+                ) {
+
+                    if (
+                            token.equalsIgnoreCase(
+                                    a
+                            )
+                    ) {
+
+                        isBrandAlias =
+                                true;
+
+                        break;
+                    }
+                }
+            }
+
+
+            if (
+                    !isBrandAlias
+            ) {
+
+                return normalizeModelToken(
+                        brandKey,
+                        token
+                );
+            }
+        }
+
+
+        Matcher hangul =
+                Pattern.compile(
+                        "[가-힣][가-힣0-9\\- ]{1,20}"
+                )
+                        .matcher(
+                                cleaned
+                        );
+
+
+        if (
+                hangul.find()
+        ) {
+
+            return hangul.group()
+                    .trim();
+        }
+
+
+        return null;
+    }
+
+
+    private String normalizeModelToken(
+            String brandKey,
+            String token
+    ) {
+
+        String t =
+                token.trim();
+
+
+        if (
+                "mercedes"
+                        .equals(
+                                brandKey
+                        )
+        ) {
+
+            String u =
+                    t.toUpperCase(
+                            Locale.ROOT
+                    );
+
+
+            if (
+                    u.equals("GLE")
+                            ||
+                    u.equals("GLC")
+                            ||
+                    u.equals("GLS")
+                            ||
+                    u.equals("GLA")
+                            ||
+                    u.equals("GLB")
+                            ||
+                    u.equals("CLA")
+                            ||
+                    u.equals("CLS")
+                            ||
+                    u.equals("CLE")
+            ) {
+
+                return u
+                        +
+                        "-클래스";
+            }
+        }
+
+
+        return t.toUpperCase(
+                Locale.ROOT
+        );
+    }
+
+
+    private String detectFuel(
+            String n
+    ) {
+
+        if (
+                containsAny(
+                        n,
+                        "plug in",
+                        "plug-in",
+                        "плъгин",
+                        "phev"
+                )
+        ) {
+
+            return "가솔린+전기";
+        }
+
+
+        if (
+                containsAny(
+                        n,
+                        "diesel",
+                        "дизел",
+                        "дизелов",
+                        "디젤"
+                )
+        ) {
+
+            return "디젤";
+        }
+
+
+        if (
+                containsAny(
+                        n,
+                        "hybrid",
+                        "хибрид",
+                        "хибриден",
+                        "하이브리드"
+                )
+        ) {
+
+            return "하이브리드";
+        }
+
+
+        if (
+                containsAny(
+                        n,
+                        "electric",
+                        "електрическа",
+                        "електрически",
+                        "електромобил",
+                        "ev",
+                        "전기"
+                )
+        ) {
+
+            return "전기";
+        }
+
+
+        if (
+                containsAny(
+                        n,
+                        "petrol",
+                        "gasoline",
+                        "бензин",
+                        "бензинов",
+                        "가솔린"
+                )
+        ) {
+
+            return "가솔린";
+        }
+
+
+        if (
+                containsAny(
+                        n,
+                        "lpg",
+                        "газ"
+                )
+        ) {
+
+            return "LPG";
+        }
+
+
+        return null;
+    }
+
+
+    private List<Integer> extractYears(
+            String raw
+    ) {
+
+        ArrayList<Integer> out =
+                new ArrayList<>();
+
+
+        Matcher m =
+                Pattern.compile(
+                        "\\b(19\\d{2}|20\\d{2})\\b"
+                )
+                        .matcher(
+                                raw
+                        );
+
+
+        while (
+                m.find()
+        ) {
+
+            try {
+
+                int y =
+                        Integer.parseInt(
+                                m.group(1)
+                        );
+
+
+                if (
+                        y >= 1980
+                                &&
+                        y <= 2099
+                ) {
+
+                    out.add(y);
+                }
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+
+        return out;
+    }
+
+
+    private Integer extractMaxMileage(
+            String n
+    ) {
+
+        Matcher thousand =
+                Pattern.compile(
+                        "(\\d{1,3})\\s*(хиляди|хил|thousand)\\s*(km|км|километра|километри)?"
+                )
+                        .matcher(n);
+
+
+        if (
+                thousand.find()
+        ) {
+
+            try {
+
+                return Integer.parseInt(
+                        thousand.group(1)
+                )
+                        *
+                        1000;
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+
+        Matcher m =
+                Pattern.compile(
+                        "([0-9][0-9\\s.,]{0,10})\\s*(km|км|километра|километри|kilometers?)"
+                )
+                        .matcher(n);
+
+
+        if (
+                m.find()
+        ) {
+
+            Long x =
+                    parseHumanNumber(
+                            m.group(1)
+                    );
+
+
+            if (
+                    x != null
+                            &&
+                    x >= 0
+                            &&
+                    x <= 2000000
+            ) {
+
+                return x.intValue();
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private Integer extractMaxPriceManWon(
+            String n
+    ) {
+
+        Matcher million =
+                Pattern.compile(
+                        "(?:до|под|max|under)?\\s*(\\d+(?:[.,]\\d+)?)\\s*(милиона|милион|million|m)\\s*(вона|вон|won|krw)"
+                )
+                        .matcher(n);
+
+
+        if (
+                million.find()
+        ) {
+
+            try {
+
+                double millions =
+                        Double.parseDouble(
+                                million.group(1)
+                                        .replace(
+                                                ",",
+                                                "."
+                                        )
+                        );
+
+
+                long krw =
+                        Math.round(
+                                millions
+                                        *
+                                1_000_000d
+                        );
+
+
+                return (int)
+                        Math.max(
+                                1,
+                                krw / 10000L
+                        );
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+
+        Matcher man =
+                Pattern.compile(
+                        "(\\d{2,6})\\s*만원"
+                )
+                        .matcher(n);
+
+
+        if (
+                man.find()
+        ) {
+
+            try {
+
+                return Integer.parseInt(
+                        man.group(1)
+                );
+
+            } catch (
+                    Exception ignored
+            ) {
+            }
+        }
+
+
+        return null;
+    }
+
+
+    private Long parseHumanNumber(
+            String value
+    ) {
+
+        if (
+                value == null
+        ) {
+
+            return null;
+        }
+
+
+        String s =
+                value.replaceAll(
+                        "[^0-9]",
+                        ""
+                );
+
+
+        if (
+                s.isEmpty()
+        ) {
+
+            return null;
+        }
+
+
+        try {
+
+            return Long.parseLong(s);
+
+        } catch (
+                Exception e
+        ) {
+
+            return null;
+        }
+    }
+
+
+    private boolean containsAny(
+            String text,
+            String... values
+    ) {
+
+        for (
+                String x : values
+        ) {
+
+            if (
+                    containsAlias(
+                            text,
+                            x
+                    )
+            ) {
+
+                return true;
+            }
+        }
+
+
+        return false;
+    }
+
+
+    private boolean containsAlias(
+            String normalizedText,
+            String alias
+    ) {
+
+        String a =
+                normalize(alias);
+
+
+        if (
+                a.isEmpty()
+        ) {
+
+            return false;
+        }
+
+
+        String padded =
+                " "
+                        +
+                normalizedText
+                        +
+                " ";
+
+
+        String target =
+                " "
+                        +
+                a
+                        +
+                " ";
+
+
+        if (
+                padded.contains(
+                        target
+                )
+        ) {
+
+            return true;
+        }
+
+
+        if (
+                a.contains("-")
+                        ||
+                a.contains(".")
+                        ||
+                a.contains("+")
+        ) {
+
+            return normalizedText
+                    .contains(a);
+        }
+
+
+        return false;
+    }
+
+
+    private String normalize(
+            String s
+    ) {
+
+        if (
+                s == null
+        ) {
+
+            return "";
+        }
+
+
+        return s
+                .toLowerCase(
+                        Locale.ROOT
+                )
+                .replace(
+                        '–',
+                        '-'
+                )
+                .replace(
+                        '—',
+                        '-'
+                )
+                .replaceAll(
+                        "[,:;!?()\\{}\"']",
+                        " "
+                )
+                .replaceAll(
+                        "\\s+",
+                        " "
+                )
+                .trim();
+    }
+
+
+    private String jsonEscape(
+            String s
+    ) {
+
+        if (
+                s == null
+        ) {
+
+            return "";
+        }
+
+
+        return s
+                .replace(
+                        "\\",
+                        "\\\\"
+                )
+                .replace(
+                        "\"",
+                        "\\\""
+                );
+    }
+
+
+    private void hideKeyboard() {
+
+        try {
+
+            InputMethodManager imm =
+                    (InputMethodManager)
+                            getSystemService(
+                                    Context.INPUT_METHOD_SERVICE
+                            );
+
+
+            if (
+                    getCurrentFocus()
+                            != null
+            ) {
+
+                imm.hideSoftInputFromWindow(
+                        getCurrentFocus()
+                                .getWindowToken(),
+                        0
+                );
+            }
+
+        } catch (
+                Exception ignored
+        ) {
+        }
+    }
+
+
+    private void initRules() {
+
+        brand(
+                "mercedes",
+                "벤츠",
+                "mercedes",
+                "mercedes-benz",
+                "benz",
+                "мерцедес",
+                "мерседес",
+                "мерцедес бенц",
+                "벤츠"
+        );
+
+
+        brand(
+                "bmw",
+                "BMW",
+                "bmw",
+                "бмв",
+                "бмв-то",
+                "би ем дабълю"
+        );
+
+
+        brand(
+                "audi",
+                "아우디",
+                "audi",
+                "ауди",
+                "아우디"
+        );
+
+
+        brand(
+                "volkswagen",
+                "폭스바겐",
+                "volkswagen",
+                "vw",
+                "фолксваген",
+                "волксваген",
+                "폭스바겐"
+        );
+
+
+        brand(
+                "porsche",
+                "포르쉐",
+                "porsche",
+                "порше",
+                "포르쉐"
+        );
+
+
+        brand(
+                "hyundai",
+                "현대",
+                "hyundai",
+                "хюндай",
+                "хундай",
+                "хендай",
+                "хюнде",
+                "현대"
+        );
+
+
+        brand(
+                "kia",
+                "기아",
+                "kia",
+                "киа",
+                "кия",
+                "기아"
+        );
+
+
+        brand(
+                "genesis",
+                "제네시스",
+                "genesis",
+                "генезис",
+                "дженезис",
+                "제네시스"
+        );
+
+
+        brand(
+                "peugeot",
+                "푸조",
+                "peugeot",
+                "пежо",
+                "푸조"
+        );
+
+
+        brand(
+                "ford",
+                "포드",
+                "ford",
+                "форд",
+                "포드"
+        );
+
+
+        brand(
+                "honda",
+                "혼다",
+                "honda",
+                "хонда",
+                "혼다"
+        );
+
+
+        brand(
+                "toyota",
+                "토요타",
+                "toyota",
+                "тойота",
+                "тоёта",
+                "토요타"
+        );
+
+
+        brand(
+                "lexus",
+                "렉서스",
+                "lexus",
+                "лексус",
+                "렉서스"
+        );
+
+
+        brand(
+                "volvo",
+                "볼보",
+                "volvo",
+                "волво",
+                "볼보"
+        );
+
+
+        brand(
+                "nissan",
+                "닛산",
+                "nissan",
+                "нисан",
+                "ниссан",
+                "닛산"
+        );
+
+
+        brand(
+                "infiniti",
+                "인피니티",
+                "infiniti",
+                "инфинити",
+                "인피니티"
+        );
+
+
+        brand(
+                "tesla",
+                "테슬라",
+                "tesla",
+                "тесла",
+                "테슬라"
+        );
+
+
+        brand(
+                "mini",
+                "미니",
+                "mini",
+                "мини",
+                "미니"
+        );
+
+
+        brand(
+                "landrover",
+                "랜드로버",
+                "land rover",
+                "landrover",
+                "ленд ровър",
+                "ленд ровер",
+                "랜드로버"
+        );
+
+
+        brand(
+                "jaguar",
+                "재규어",
+                "jaguar",
+                "ягуар",
+                "재규어"
+        );
+
+
+        brand(
+                "jeep",
+                "지프",
+                "jeep",
+                "джип",
+                "지프"
+        );
+
+
+        brand(
+                "renault",
+                "르노코리아(삼성)",
+                "renault",
+                "рено",
+                "르노"
+        );
+
+
+        brand(
+                "chevrolet",
+                "쉐보레(GM대우)",
+                "chevrolet",
+                "chevy",
+                "шевролет",
+                "쉐보레"
+        );
+
+
+        brand(
+                "kgm",
+                "KG모빌리티(쌍용)",
+                "kg mobility",
+                "kgm",
+                "ssangyong",
+                "санг йонг",
+                "сангйонг",
+                "쌍용",
+                "kg모빌리티"
+        );
+
+
+        brand(
+                "citroen",
+                "시트로엥",
+                "citroen",
+                "citroën",
+                "ситроен",
+                "시트로엥"
+        );
+
+
+        brand(
+                "mazda",
+                "마쯔다",
+                "mazda",
+                "мазда",
+                "마쯔다"
+        );
+
+
+        brand(
+                "subaru",
+                "스바루",
+                "subaru",
+                "субару",
+                "스바루"
+        );
+
+
+        brand(
+                "mitsubishi",
+                "미쓰비시",
+                "mitsubishi",
+                "мицубиши",
+                "미쓰비시"
+        );
+
+
+        brand(
+                "suzuki",
+                "스즈키",
+                "suzuki",
+                "сузуки",
+                "스즈키"
+        );
+
+
+        brand(
+                "fiat",
+                "피아트",
+                "fiat",
+                "фиат",
+                "피아트"
+        );
+
+
+        brand(
+                "alfaromeo",
+                "알파로메오",
+                "alfa romeo",
+                "алфа ромео",
+                "알파로메오"
+        );
+
+
+        brand(
+                "maserati",
+                "마세라티",
+                "maserati",
+                "мазерати",
+                "마세라티"
+        );
+
+
+        brand(
+                "bentley",
+                "벤틀리",
+                "bentley",
+                "бентли",
+                "벤틀리"
+        );
+
+
+        brand(
+                "rollsroyce",
+                "롤스로이스",
+                "rolls royce",
+                "rolls-royce",
+                "ролс ройс",
+                "롤스로이스"
+        );
+
+
+        brand(
+                "ferrari",
+                "페라리",
+                "ferrari",
+                "ферари",
+                "페라리"
+        );
+
+
+        brand(
+                "lamborghini",
+                "람보르기니",
+                "lamborghini",
+                "ламборгини",
+                "람보르기니"
+        );
+
+
+        brand(
+                "mclaren",
+                "맥라렌",
+                "mclaren",
+                "макларън",
+                "макларен",
+                "맥라렌"
+        );
+
+
+        brand(
+                "astonmartin",
+                "애스턴마틴",
+                "aston martin",
+                "астън мартин",
+                "애스턴마틴"
+        );
+
+
+        brand(
+                "cadillac",
+                "캐딜락",
+                "cadillac",
+                "кадилак",
+                "캐딜락"
+        );
+
+
+        brand(
+                "
